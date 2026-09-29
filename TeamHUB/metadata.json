@@ -1,0 +1,6 @@
+{
+  "name": "TeamHub - Engineering & Design Collaboration Platform",
+  "description": "Interactive prototype uniting team channels, sprint Kanban, Q&A knowledge base, document management, and AI copilot with responsive mobile and desktop experiences.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
