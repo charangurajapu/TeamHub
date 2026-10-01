@@ -348,7 +348,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           className="bg-[#ffffff] p-5 rounded-2xl shadow-xs border border-[#eaedff] flex flex-col justify-between hover:shadow-md transition-shadow cursor-pointer group"
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] uppercase tracking-wider text-[#6e7b6c] font-semibold">AI Copilot</span>
+            <span className="text-[11px] uppercase tracking-wider text-[#6e7b6c] font-semibold">AI Assistant</span>
             <div className="w-8 h-8 rounded-xl bg-[#7ffc97]/40 text-[#006b2c] flex items-center justify-center">
               <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
             </div>

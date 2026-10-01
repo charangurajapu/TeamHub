@@ -856,7 +856,7 @@ export const QuestionsView: React.FC<QuestionsViewProps> = ({
                     onClick={onOpenAiDrawer}
                     className="w-full py-2 bg-[#006b2c] hover:bg-[#00873a] text-white text-xs font-semibold rounded-xl transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    <span>Launch AI Copilot</span>
+                    <span>Launch AI Assistant</span>
                     <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
                   </button>
                 </div>

@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>TeamHub — Engineering & Design Collaboration Platform</title>
-    <meta name="description" content="Seamless interactive prototype combining team channels, sprint Kanban, Q&A knowledge base, document management, and AI copilot with responsive mobile and desktop experiences." />
+    <meta name="description" content="Seamless interactive prototype combining team channels, sprint Kanban, Q&A knowledge base, document management, and AI assistant with responsive mobile and desktop experiences." />
     <meta property="og:title" content="TeamHub — Engineering & Design Collaboration Platform" />
-    <meta property="og:description" content="Seamless interactive prototype combining team channels, sprint Kanban, Q&A knowledge base, document management, and AI copilot with responsive mobile and desktop experiences." />
+    <meta property="og:description" content="Seamless interactive prototype combining team channels, sprint Kanban, Q&A knowledge base, document management, and AI assistant with responsive mobile and desktop experiences." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -14,8 +14,23 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" />
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('teamhub_theme');
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (saved === 'dark' || (saved === 'system' && prefersDark) || (!saved && prefersDark)) {
+            document.documentElement.classList.add('dark');
+            document.documentElement.style.colorScheme = 'dark';
+          } else {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.style.colorScheme = 'light';
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
-  <body class="bg-[#faf8ff] text-[#131b2e] antialiased selection:bg-[#7ffc97] selection:text-[#002109]">
+  <body class="bg-[var(--surface)] text-[var(--on-surface)] antialiased selection:bg-[#7ffc97] selection:text-[#002109] dark:selection:bg-[#22c55e] dark:selection:text-[#004b1e] min-h-screen">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

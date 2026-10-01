@@ -20,6 +20,7 @@ export interface User {
   roleTitle: string;
   department: string;
   pod: string;
+  podId?: string;
   avatarUrl?: string;
   initials: string;
   initialsColor?: string;
@@ -106,6 +107,8 @@ export interface Task {
 
 export interface ChannelMessage {
   id: string;
+  channelId?: string;
+  channel_id?: string;
   author: User;
   createdAt: string;
   content: string;
@@ -147,11 +150,16 @@ export interface ChannelMessage {
 export interface Channel {
   id: string;
   name: string;
+  slug?: string;
   description: string;
   unreadCount: number;
   isPrivate?: boolean;
   membersCount: number;
   icon?: string;
+  isMandatory?: boolean;
+  isProtected?: boolean;
+  deletedAt?: string | null;
+  deletedBy?: string | null;
 }
 
 export interface QuestionAnswer {
@@ -316,6 +324,7 @@ export type ViewMode =
   | 'profile-settings'
   | 'waiting-approval'
   | 'auth'
-  | 'reviews';
+  | 'reviews'
+  | 'team';
 
 export type DeviceMode = 'desktop' | 'mobile-framed' | 'mobile-full';

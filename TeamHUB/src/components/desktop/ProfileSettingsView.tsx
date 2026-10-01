@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { User, Role } from '../../types';
 import { updateUserProfileRecord, supabase } from '../../lib/supabase';
+import { useTheme } from '../../context/ThemeContext';
 
 interface ProfileSettingsViewProps {
   currentUser: User;
@@ -16,6 +17,7 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
   onRemovePhoto,
 }) => {
   const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'skills' | 'preferences' | 'security'>('personal');
+  const { theme: globalTheme, setTheme: setGlobalTheme, resolvedTheme } = useTheme();
 
   // Form states initialized with currentUser data
   const [name, setName] = useState(currentUser.name);
@@ -37,14 +39,18 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
   // Social Links states
   const [github, setGithub] = useState(currentUser.socialLinks?.github || '');
   const [linkedin, setLinkedin] = useState(currentUser.socialLinks?.linkedin || '');
-  const [portfolio, setPortfolio] = useState(currentUser.socialLinks?.portfolio || '');
 
   // Preferences & Theme states
   const [notifMentions, setNotifMentions] = useState(currentUser.notificationPreferences?.directMentions ?? true);
   const [notifTasks, setNotifTasks] = useState(currentUser.notificationPreferences?.taskStatusChanges ?? true);
   const [notifQna, setNotifQna] = useState(currentUser.notificationPreferences?.qnaReplies ?? false);
-  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(currentUser.theme || 'light');
+  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(currentUser.theme || globalTheme || 'light');
   const [focusStatus, setFocusStatus] = useState(currentUser.status);
+
+  const handleSelectTheme = (newTheme: 'light' | 'dark' | 'system') => {
+    setTheme(newTheme);
+    setGlobalTheme(newTheme);
+  };
 
   // Status & Feedback states
   const [isSaving, setIsSaving] = useState(false);
@@ -134,7 +140,6 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
     setSkills(currentUser.skills || []);
     setGithub(currentUser.socialLinks?.github || '');
     setLinkedin(currentUser.socialLinks?.linkedin || '');
-    setPortfolio(currentUser.socialLinks?.portfolio || '');
     setNotifMentions(currentUser.notificationPreferences?.directMentions ?? true);
     setNotifTasks(currentUser.notificationPreferences?.taskStatusChanges ?? true);
     setNotifQna(currentUser.notificationPreferences?.qnaReplies ?? false);
@@ -169,12 +174,8 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
       errs.linkedin = 'Enter a valid LinkedIn username or URL.';
     }
 
-    if (portfolio && !portfolio.startsWith('http://') && !portfolio.startsWith('https://') && !portfolio.includes('.')) {
-      errs.portfolio = 'Enter a valid URL (e.g. https://myportfolio.com).';
-    }
-
     return errs;
-  }, [name, bio, phone, github, linkedin, portfolio]);
+  }, [name, bio, phone, github, linkedin]);
 
   const hasErrors = Object.keys(errors).length > 0;
 
@@ -192,7 +193,6 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
     if (JSON.stringify(skills) !== JSON.stringify(currentUser.skills || [])) return true;
     if ((github || '') !== (currentUser.socialLinks?.github || '')) return true;
     if ((linkedin || '') !== (currentUser.socialLinks?.linkedin || '')) return true;
-    if ((portfolio || '') !== (currentUser.socialLinks?.portfolio || '')) return true;
     if (notifMentions !== (currentUser.notificationPreferences?.directMentions ?? true)) return true;
     if (notifTasks !== (currentUser.notificationPreferences?.taskStatusChanges ?? true)) return true;
     if (notifQna !== (currentUser.notificationPreferences?.qnaReplies ?? false)) return true;
@@ -213,7 +213,6 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
     skills,
     github,
     linkedin,
-    portfolio,
     notifMentions,
     notifTasks,
     notifQna,
@@ -252,7 +251,6 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
       socialLinks: {
         github: github.trim(),
         linkedin: linkedin.trim(),
-        portfolio: portfolio.trim(),
       },
       notificationPreferences: {
         directMentions: notifMentions,
@@ -853,25 +851,6 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
                     <span className="text-[11px] text-[#ba1a1a] font-medium mt-0.5 block">{errors.linkedin}</span>
                   )}
                 </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-[#6e7b6c] mb-1">Portfolio / Personal Website</label>
-                  <div className="relative">
-                    <span className="material-symbols-outlined absolute left-3 top-2 text-[17px] text-[#6e7b6c]">
-                      language
-                    </span>
-                    <input
-                      type="url"
-                      value={portfolio}
-                      onChange={(e) => setPortfolio(e.target.value)}
-                      placeholder="https://mywebsite.com"
-                      className="w-full pl-9 pr-3 py-2 rounded-xl bg-[#f2f3ff] border border-[#eaedff] text-xs focus:outline-none focus:bg-white"
-                    />
-                  </div>
-                  {errors.portfolio && (
-                    <span className="text-[11px] text-[#ba1a1a] font-medium mt-0.5 block">{errors.portfolio}</span>
-                  )}
-                </div>
               </div>
             </div>
           )}
@@ -929,45 +908,148 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
               </div>
 
               {/* Theme Mode Selector */}
-              <div className="pt-3 border-t border-[#eaedff]">
-                <span className="font-bold text-xs text-[#131b2e] block mb-2">Theme Mode</span>
-                <div className="grid grid-cols-3 gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setTheme('light')}
-                    className={`p-3 rounded-xl border flex flex-col items-center gap-1.5 transition-all cursor-pointer ${
+              <div className="pt-4 border-t border-[#eaedff]">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <span className="font-bold text-xs text-[#131b2e] block">Appearance & Theme</span>
+                    <span className="text-[11px] text-[#6e7b6c]">Customize visual ergonomics and high-contrast night aesthetics.</span>
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full bg-[#006b2c]/10 text-[#006b2c] font-semibold dark:bg-[#22c55e]/20 dark:text-[#4be277]">
+                    <span className="material-symbols-outlined text-[13px]">auto_fix_high</span>
+                    {resolvedTheme === 'dark' ? 'Midnight Active' : 'Calm Light Active'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                  {/* Tile 1: Light Theme */}
+                  <div
+                    onClick={() => handleSelectTheme('light')}
+                    className={`group cursor-pointer rounded-xl p-3.5 transition-all flex flex-col justify-between border ${
                       theme === 'light'
-                        ? 'border-[#006b2c] bg-[#ffffff] shadow-xs text-[#006b2c] font-bold'
-                        : 'border-[#eaedff] bg-[#f2f3ff] text-[#6e7b6c] hover:bg-[#eaedff]'
+                        ? 'border-[#006b2c] dark:border-[#22c55e] bg-[#ffffff] ring-2 ring-[#006b2c]/30 shadow-md relative'
+                        : 'border-[#eaedff] bg-[#f2f3ff] hover:bg-[#eaedff]'
                     }`}
                   >
-                    <span className="material-symbols-outlined text-[20px]">light_mode</span>
-                    <span>Calm Light</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTheme('dark')}
-                    className={`p-3 rounded-xl border flex flex-col items-center gap-1.5 transition-all cursor-pointer ${
+                    {theme === 'light' && (
+                      <div className="absolute -top-2 -right-2 bg-[#006b2c] dark:bg-[#22c55e] text-white dark:text-[#003915] w-5 h-5 rounded-full flex items-center justify-center shadow-xs">
+                        <span className="material-symbols-outlined text-[14px] font-bold">check</span>
+                      </div>
+                    )}
+                    <div className="relative w-full h-20 rounded-lg overflow-hidden bg-slate-200 p-2 flex flex-col gap-1.5 shadow-2xs">
+                      <div className="w-full h-2.5 rounded bg-white shadow-2xs flex items-center px-1.5 gap-1">
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                        <div className="w-8 h-1 rounded bg-slate-300"></div>
+                      </div>
+                      <div className="flex gap-1.5 flex-1">
+                        <div className="w-1/3 bg-slate-100 rounded p-1 flex flex-col gap-1">
+                          <div className="w-full h-1 bg-slate-300 rounded"></div>
+                          <div className="w-2/3 h-1 bg-slate-300 rounded"></div>
+                        </div>
+                        <div className="flex-1 bg-white rounded p-1 flex flex-col gap-1">
+                          <div className="w-full h-1 bg-slate-200 rounded"></div>
+                          <div className="w-4/5 h-1 bg-slate-100 rounded"></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between">
+                        <span className={`text-xs font-semibold ${theme === 'light' ? 'text-[#006b2c] dark:text-[#4be277]' : 'text-[#131b2e]'}`}>
+                          Calm Light
+                        </span>
+                        <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center ${theme === 'light' ? 'bg-[#006b2c] dark:bg-[#22c55e] text-white' : 'border border-[#bdcaba]'}`}>
+                          {theme === 'light' && <span className="material-symbols-outlined text-[10px]">done</span>}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-[#6e7b6c] mt-0.5">Calm daylight clarity with neutral paper tones.</p>
+                    </div>
+                  </div>
+
+                  {/* Tile 2: Midnight Dark */}
+                  <div
+                    onClick={() => handleSelectTheme('dark')}
+                    className={`group cursor-pointer rounded-xl p-3.5 transition-all flex flex-col justify-between border ${
                       theme === 'dark'
-                        ? 'border-[#006b2c] bg-[#ffffff] shadow-xs text-[#006b2c] font-bold'
-                        : 'border-[#eaedff] bg-[#f2f3ff] text-[#6e7b6c] hover:bg-[#eaedff]'
+                        ? 'border-[#006b2c] dark:border-[#22c55e] bg-[#ffffff] ring-2 ring-[#006b2c]/30 shadow-md relative'
+                        : 'border-[#eaedff] bg-[#f2f3ff] hover:bg-[#eaedff]'
                     }`}
                   >
-                    <span className="material-symbols-outlined text-[20px]">dark_mode</span>
-                    <span>Midnight</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTheme('system')}
-                    className={`p-3 rounded-xl border flex flex-col items-center gap-1.5 transition-all cursor-pointer ${
+                    {theme === 'dark' && (
+                      <div className="absolute -top-2 -right-2 bg-[#006b2c] dark:bg-[#22c55e] text-white dark:text-[#003915] w-5 h-5 rounded-full flex items-center justify-center shadow-xs">
+                        <span className="material-symbols-outlined text-[14px] font-bold">check</span>
+                      </div>
+                    )}
+                    <div className="relative w-full h-20 rounded-lg overflow-hidden bg-[#060e20] p-2 flex flex-col gap-1.5 shadow-2xs border border-[#3e495d]/30">
+                      <div className="w-full h-2.5 rounded bg-[#171f33] flex items-center px-1.5 gap-1">
+                        <div className="w-1.5 h-1.5 rounded-full bg-[#22c55e]"></div>
+                        <div className="w-8 h-1 rounded bg-[#3e495d]"></div>
+                      </div>
+                      <div className="flex gap-1.5 flex-1">
+                        <div className="w-1/3 bg-[#131b2e] rounded p-1 flex flex-col gap-1">
+                          <div className="w-full h-1 bg-[#3e495d] rounded"></div>
+                          <div className="w-2/3 h-1 bg-[#3e495d] rounded"></div>
+                        </div>
+                        <div className="flex-1 bg-[#171f33] rounded p-1 flex flex-col gap-1">
+                          <div className="w-full h-1 bg-[#3e495d] rounded"></div>
+                          <div className="w-4/5 h-1 bg-[#222a3d] rounded"></div>
+                          <div className="w-1/2 h-0.5 bg-[#22c55e]/60 rounded mt-auto"></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between">
+                        <span className={`text-xs font-semibold ${theme === 'dark' ? 'text-[#006b2c] dark:text-[#4be277]' : 'text-[#131b2e]'}`}>
+                          Midnight Dark
+                        </span>
+                        <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center ${theme === 'dark' ? 'bg-[#006b2c] dark:bg-[#22c55e] text-white' : 'border border-[#bdcaba]'}`}>
+                          {theme === 'dark' && <span className="material-symbols-outlined text-[10px]">done</span>}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-[#6e7b6c] mt-0.5">Deep background with slate surfaces and vibrant green accent.</p>
+                    </div>
+                  </div>
+
+                  {/* Tile 3: System Match */}
+                  <div
+                    onClick={() => handleSelectTheme('system')}
+                    className={`group cursor-pointer rounded-xl p-3.5 transition-all flex flex-col justify-between border ${
                       theme === 'system'
-                        ? 'border-[#006b2c] bg-[#ffffff] shadow-xs text-[#006b2c] font-bold'
-                        : 'border-[#eaedff] bg-[#f2f3ff] text-[#6e7b6c] hover:bg-[#eaedff]'
+                        ? 'border-[#006b2c] dark:border-[#22c55e] bg-[#ffffff] ring-2 ring-[#006b2c]/30 shadow-md relative'
+                        : 'border-[#eaedff] bg-[#f2f3ff] hover:bg-[#eaedff]'
                     }`}
                   >
-                    <span className="material-symbols-outlined text-[20px]">desktop_windows</span>
-                    <span>System Match</span>
-                  </button>
+                    {theme === 'system' && (
+                      <div className="absolute -top-2 -right-2 bg-[#006b2c] dark:bg-[#22c55e] text-white dark:text-[#003915] w-5 h-5 rounded-full flex items-center justify-center shadow-xs">
+                        <span className="material-symbols-outlined text-[14px] font-bold">check</span>
+                      </div>
+                    )}
+                    <div className="relative w-full h-20 rounded-lg overflow-hidden flex shadow-2xs border border-[#eaedff]">
+                      {/* Left Half Light */}
+                      <div className="w-1/2 bg-slate-200 p-1.5 flex flex-col gap-1">
+                        <div className="w-full h-2 rounded bg-white flex items-center px-1">
+                          <div className="w-3 h-0.5 rounded bg-slate-300"></div>
+                        </div>
+                        <div className="w-full flex-1 bg-white rounded p-1"></div>
+                      </div>
+                      {/* Right Half Dark */}
+                      <div className="w-1/2 bg-[#060e20] p-1.5 flex flex-col gap-1 border-l border-[#3e495d]/40">
+                        <div className="w-full h-2 rounded bg-[#171f33] flex items-center px-1">
+                          <div className="w-3 h-0.5 rounded bg-[#3e495d]"></div>
+                        </div>
+                        <div className="w-full flex-1 bg-[#171f33] rounded p-1"></div>
+                      </div>
+                    </div>
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between">
+                        <span className={`text-xs font-semibold ${theme === 'system' ? 'text-[#006b2c] dark:text-[#4be277]' : 'text-[#131b2e]'}`}>
+                          System Match
+                        </span>
+                        <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center ${theme === 'system' ? 'bg-[#006b2c] dark:bg-[#22c55e] text-white' : 'border border-[#bdcaba]'}`}>
+                          {theme === 'system' && <span className="material-symbols-outlined text-[10px]">done</span>}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-[#6e7b6c] mt-0.5">Synchronizes automatically with your OS light/dark schedule.</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1053,7 +1135,6 @@ export const ProfileSettingsView: React.FC<ProfileSettingsViewProps> = ({
                   setSkills(currentUser.skills || []);
                   setGithub(currentUser.socialLinks?.github || '');
                   setLinkedin(currentUser.socialLinks?.linkedin || '');
-                  setPortfolio(currentUser.socialLinks?.portfolio || '');
                   setFocusStatus(currentUser.status);
                 }}
                 disabled={!isDirty || isSaving}

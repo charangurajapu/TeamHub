@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { User, Role } from '../../types';
-import { USERS, JOIN_REQUESTS } from '../../data/mockData';
-import { testServerSideRlsAccess, getActiveWorkspace, regenerateWorkspacePodCode, updateUserProfileRecord } from '../../lib/supabase';
+import { User, Role, JoinRequest } from '../../types';
+import { USERS } from '../../data/mockData';
+import {
+  testServerSideRlsAccess,
+  getActiveWorkspace,
+  regenerateWorkspacePodCode,
+  updateUserProfileRecord,
+  fetchTeamMembersFromDb,
+  fetchJoinRequestsFromDb,
+} from '../../lib/supabase';
 
 interface AdminUsersViewProps {
   currentUser?: User;
@@ -9,8 +16,9 @@ interface AdminUsersViewProps {
 
 export const AdminUsersView: React.FC<AdminUsersViewProps> = ({ currentUser }) => {
   const activeUser = currentUser || USERS.sarah;
-  const [usersList, setUsersList] = useState<User[]>(Object.values(USERS));
-  const [requests, setRequests] = useState(JOIN_REQUESTS);
+  const [usersList, setUsersList] = useState<User[]>([]);
+  const [requests, setRequests] = useState<JoinRequest[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
   const [deptFilter, setDeptFilter] = useState('all');
@@ -49,15 +57,42 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({ currentUser }) =
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    async function loadWs() {
-      const ws = await getActiveWorkspace(activeUser.email);
-      if (ws) {
-        setWorkspace(ws);
-        setCurrentPodCode(ws.pod_code || 'TH-4821-ENG');
+    let isMounted = true;
+    async function loadData() {
+      setIsLoading(true);
+      try {
+        const ws = await getActiveWorkspace(activeUser.email);
+        if (isMounted && ws) {
+          setWorkspace(ws);
+          setCurrentPodCode(ws.pod_code || 'TH-4821-ENG');
+        }
+
+        const [usersRes, requestsRes] = await Promise.all([
+          fetchTeamMembersFromDb(activeUser),
+          fetchJoinRequestsFromDb(activeUser),
+        ]);
+
+        if (isMounted) {
+          if (usersRes.success && usersRes.users) {
+            setUsersList(usersRes.users);
+          }
+          if (requestsRes.data) {
+            setRequests(requestsRes.data);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load admin users data:', err);
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     }
-    loadWs();
-  }, [activeUser.email]);
+    loadData();
+    return () => {
+      isMounted = false;
+    };
+  }, [activeUser]);
 
   const handleCopyPodCode = () => {
     navigator.clipboard.writeText(currentPodCode);
@@ -340,11 +375,18 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({ currentUser }) =
             <span className="material-symbols-outlined text-[18px] text-[#006b2c]">group</span>
           </div>
           <div className="mt-3 flex items-baseline justify-between">
-            <span className="text-2xl font-bold text-[#131b2e]">24 <span className="text-xs font-normal text-[#6e7b6c]">/ 30</span></span>
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#7ffc97] text-[#005320]">80% filled</span>
+            <span className="text-2xl font-bold text-[#131b2e]">
+              {usersList.length} <span className="text-xs font-normal text-[#6e7b6c]">/ {workspace?.seats || 30}</span>
+            </span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#7ffc97] text-[#005320]">
+              {Math.round((usersList.length / (workspace?.seats || 30)) * 100)}% filled
+            </span>
           </div>
           <div className="w-full bg-[#eaedff] h-1.5 rounded-full mt-2.5 overflow-hidden">
-            <div className="bg-[#006b2c] h-full rounded-full" style={{ width: '80%' }}></div>
+            <div
+              className="bg-[#006b2c] h-full rounded-full transition-all"
+              style={{ width: `${Math.min(100, Math.round((usersList.length / (workspace?.seats || 30)) * 100))}%` }}
+            ></div>
           </div>
         </div>
 
@@ -354,10 +396,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({ currentUser }) =
             <span className="material-symbols-outlined text-[18px] text-[#006b2c]">check_circle</span>
           </div>
           <div className="mt-3 flex items-baseline justify-between">
-            <span className="text-2xl font-bold text-[#131b2e]">21</span>
+            <span className="text-2xl font-bold text-[#131b2e]">{usersList.length}</span>
             <span className="text-[10px] text-[#006b2c] font-bold flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-[#006b2c] animate-pulse"></span>
-              Online now (14)
+              Online now ({usersList.filter((u) => u.status === 'online').length})
             </span>
           </div>
           <span className="text-[10px] text-[#6e7b6c] mt-2">Active within past 48 hours</span>
@@ -499,154 +541,193 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({ currentUser }) =
           </div>
         </div>
 
-        {/* Table */}
+        {/* Table / Empty State */}
         <div className="overflow-x-auto min-h-[360px] pb-16">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-[#f2f3ff] text-[#6e7b6c] uppercase tracking-wider font-semibold text-[10px]">
-                <th className="py-3 px-4">User</th>
-                <th className="py-3 px-4">Role</th>
-                <th className="py-3 px-4">Department / Pod</th>
-                <th className="py-3 px-4">Status</th>
-                <th className="py-3 px-4">Last Active</th>
-                <th className="py-3 px-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#eaedff] text-[#131b2e]">
-              {filteredUsers.map((user) => (
-                <tr
-                  key={user.id}
-                  className={`hover:bg-[#f2f3ff]/50 transition-colors ${
-                    openUserMenuId === user.id ? 'relative z-20' : ''
-                  }`}
+          {isLoading ? (
+            <div className="py-24 flex flex-col items-center justify-center gap-3 text-slate-400">
+              <span className="material-symbols-outlined text-3xl animate-spin text-[#006b2c]">sync</span>
+              <span className="text-xs font-medium text-[#6e7b6c]">Loading team members from database...</span>
+            </div>
+          ) : usersList.length === 0 ? (
+            <div className="py-20 px-6 flex flex-col items-center justify-center text-center max-w-md mx-auto">
+              <div className="w-16 h-16 rounded-2xl bg-[#eaedff] flex items-center justify-center text-[#006b2c] mb-4 shadow-xs">
+                <span className="material-symbols-outlined text-4xl">group_off</span>
+              </div>
+              <h3 className="text-base font-bold text-[#131b2e] mb-1">No team members yet</h3>
+              <p className="text-xs text-[#6e7b6c] leading-relaxed mb-6">
+                No team members yet — share your pod code to invite your team.
+              </p>
+              <div className="flex items-center gap-2 p-2 px-3.5 bg-[#f2f3ff] rounded-xl border border-[#eaedff] shadow-2xs">
+                <span className="text-[11px] font-medium text-[#6e7b6c]">Pod Invite Code:</span>
+                <span className="font-mono text-xs font-bold text-[#006b2c] tracking-wider select-all">
+                  {currentPodCode}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCopyPodCode}
+                  className="flex items-center gap-1 text-[11px] font-bold text-[#006b2c] hover:underline cursor-pointer ml-1"
                 >
-                  <td className="py-3.5 px-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-[#eaedff] text-[#006b2c] font-bold text-xs flex items-center justify-center">
-                        {user.initials}
-                      </div>
-                      <div>
-                        <span className="font-bold text-[#131b2e] block leading-none">{user.name}</span>
-                        <span className="text-[10px] text-[#6e7b6c]">{user.email}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="py-3.5 px-4">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        user.role === 'admin'
-                          ? 'bg-[#ffdcc3] text-[#2f1500]'
-                          : user.role === 'lead'
-                          ? 'bg-[#dbe1ff] text-[#00174b]'
-                          : 'bg-[#eaedff] text-[#3e4a3d]'
-                      }`}
-                    >
-                      {user.role === 'admin' ? 'Administrator' : user.role === 'lead' ? 'Team Lead' : 'Team Member'}
-                    </span>
-                  </td>
-                  <td className="py-3.5 px-4 text-[#3e4a3d]">{user.pod || user.department}</td>
-                  <td className="py-3.5 px-4">
-                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#7ffc97]/40 text-[#005320] text-[10px] font-bold">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#006b2c]"></span>
-                      Active
-                    </span>
-                  </td>
-                  <td className="py-3.5 px-4 text-[#6e7b6c]">{user.lastActive}</td>
-                  <td className="py-3.5 px-4 text-right">
-                    <div className="relative inline-block text-left">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setOpenUserMenuId(openUserMenuId === user.id ? null : user.id);
-                        }}
-                        className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                          openUserMenuId === user.id
-                            ? 'bg-[#eaedff] text-[#006b2c]'
-                            : 'text-[#6e7b6c] hover:bg-[#eaedff] hover:text-[#131b2e]'
-                        }`}
-                        title="User actions"
-                      >
-                        <span className="material-symbols-outlined text-[16px]">more_vert</span>
-                      </button>
-
-                      {openUserMenuId === user.id && (
-                        <div
-                          onClick={(e) => e.stopPropagation()}
-                          className="absolute right-0 top-full mt-1.5 w-52 rounded-2xl bg-[#ffffff] border border-[#eaedff] shadow-xl p-1.5 z-50 animate-in fade-in slide-in-from-top-1 text-left"
-                        >
-                          <div className="px-3 py-1.5 text-[10px] uppercase font-bold text-[#6e7b6c] tracking-wider border-b border-[#eaedff] mb-1">
-                            User Actions
-                          </div>
-
-                          <div className="px-3 py-1 text-[11px] font-semibold text-[#6e7b6c]">
-                            Change Role:
-                          </div>
-
-                          {user.role !== 'admin' && (
-                            <button
-                              onClick={() => handleRoleChange(user, 'admin')}
-                              className="w-full flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs text-[#8d4b00] hover:bg-[#ffdcc3]/40 transition-colors text-left font-medium cursor-pointer"
-                            >
-                              <span className="material-symbols-outlined text-[15px]">shield</span>
-                              <span>Make Administrator</span>
-                            </button>
-                          )}
-
-                          {user.role !== 'lead' && (
-                            <button
-                              onClick={() => handleRoleChange(user, 'lead')}
-                              className="w-full flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs text-[#0051d5] hover:bg-[#dbe1ff]/40 transition-colors text-left font-medium cursor-pointer"
-                            >
-                              <span className="material-symbols-outlined text-[15px]">workspace_premium</span>
-                              <span>Make Team Lead</span>
-                            </button>
-                          )}
-
-                          {user.role !== 'member' && (
-                            <button
-                              onClick={() => handleRoleChange(user, 'member')}
-                              className="w-full flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs text-[#006b2c] hover:bg-[#7ffc97]/30 transition-colors text-left font-medium cursor-pointer"
-                            >
-                              <span className="material-symbols-outlined text-[15px]">person</span>
-                              <span>Make Team Member</span>
-                            </button>
-                          )}
-
-                          <div className="h-px bg-[#eaedff] my-1"></div>
-
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(user.email);
-                              setOpenUserMenuId(null);
-                              setToastMessage(`Copied email for ${user.name}!`);
-                              setTimeout(() => setToastMessage(null), 3000);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-[#3e4a3d] hover:bg-[#f2f3ff] hover:text-[#131b2e] transition-colors text-left font-medium cursor-pointer"
-                          >
-                            <span className="material-symbols-outlined text-[15px] text-[#6e7b6c]">mail</span>
-                            <span>Copy Email</span>
-                          </button>
-
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(user.id);
-                              setOpenUserMenuId(null);
-                              setToastMessage(`Copied user ID for ${user.name}!`);
-                              setTimeout(() => setToastMessage(null), 3000);
-                            }}
-                            className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-[#3e4a3d] hover:bg-[#f2f3ff] hover:text-[#131b2e] transition-colors text-left font-medium cursor-pointer"
-                          >
-                            <span className="material-symbols-outlined text-[15px] text-[#6e7b6c]">badge</span>
-                            <span>Copy User ID</span>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </td>
+                  <span className="material-symbols-outlined text-[14px]">
+                    {podCodeCopied ? 'check' : 'content_copy'}
+                  </span>
+                  <span>{podCodeCopied ? 'Copied' : 'Copy'}</span>
+                </button>
+              </div>
+            </div>
+          ) : filteredUsers.length === 0 ? (
+            <div className="py-20 px-4 flex flex-col items-center justify-center text-center">
+              <span className="material-symbols-outlined text-3xl text-slate-300 mb-2">person_search</span>
+              <p className="text-xs font-semibold text-[#131b2e]">No team members match your filters</p>
+              <p className="text-[11px] text-[#6e7b6c] mt-0.5">Try resetting search or filter options</p>
+            </div>
+          ) : (
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-[#f2f3ff] text-[#6e7b6c] uppercase tracking-wider font-semibold text-[10px]">
+                  <th className="py-3 px-4">User</th>
+                  <th className="py-3 px-4">Role</th>
+                  <th className="py-3 px-4">Department / Pod</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Last Active</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-[#eaedff] text-[#131b2e]">
+                {filteredUsers.map((user) => (
+                  <tr
+                    key={user.id}
+                    className={`hover:bg-[#f2f3ff]/50 transition-colors ${
+                      openUserMenuId === user.id ? 'relative z-20' : ''
+                    }`}
+                  >
+                    <td className="py-3.5 px-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-[#eaedff] text-[#006b2c] font-bold text-xs flex items-center justify-center">
+                          {user.initials}
+                        </div>
+                        <div>
+                          <span className="font-bold text-[#131b2e] block leading-none">{user.name}</span>
+                          <span className="text-[10px] text-[#6e7b6c]">{user.email}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          user.role === 'admin'
+                            ? 'bg-[#ffdcc3] text-[#2f1500]'
+                            : user.role === 'lead'
+                            ? 'bg-[#dbe1ff] text-[#00174b]'
+                            : 'bg-[#eaedff] text-[#3e4a3d]'
+                        }`}
+                      >
+                        {user.role === 'admin' ? 'Administrator' : user.role === 'lead' ? 'Team Lead' : 'Team Member'}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-4 text-[#3e4a3d]">{user.pod || user.department}</td>
+                    <td className="py-3.5 px-4">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#7ffc97]/40 text-[#005320] text-[10px] font-bold">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#006b2c]"></span>
+                        Active
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-4 text-[#6e7b6c]">{user.lastActive}</td>
+                    <td className="py-3.5 px-4 text-right">
+                      <div className="relative inline-block text-left">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenUserMenuId(openUserMenuId === user.id ? null : user.id);
+                          }}
+                          className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                            openUserMenuId === user.id
+                              ? 'bg-[#eaedff] text-[#006b2c]'
+                              : 'text-[#6e7b6c] hover:bg-[#eaedff] hover:text-[#131b2e]'
+                          }`}
+                          title="User actions"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">more_vert</span>
+                        </button>
+
+                        {openUserMenuId === user.id && (
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="absolute right-0 top-full mt-1.5 w-52 rounded-2xl bg-[#ffffff] border border-[#eaedff] shadow-xl p-1.5 z-50 animate-in fade-in slide-in-from-top-1 text-left"
+                          >
+                            <div className="px-3 py-1.5 text-[10px] uppercase font-bold text-[#6e7b6c] tracking-wider border-b border-[#eaedff] mb-1">
+                              User Actions
+                            </div>
+
+                            <div className="px-3 py-1 text-[11px] font-semibold text-[#6e7b6c]">
+                              Change Role:
+                            </div>
+
+                            {user.role !== 'admin' && (
+                              <button
+                                onClick={() => handleRoleChange(user, 'admin')}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs text-[#8d4b00] hover:bg-[#ffdcc3]/40 transition-colors text-left font-medium cursor-pointer"
+                              >
+                                <span className="material-symbols-outlined text-[15px]">shield</span>
+                                <span>Make Administrator</span>
+                              </button>
+                            )}
+
+                            {user.role !== 'lead' && (
+                              <button
+                                onClick={() => handleRoleChange(user, 'lead')}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs text-[#0051d5] hover:bg-[#dbe1ff]/40 transition-colors text-left font-medium cursor-pointer"
+                              >
+                                <span className="material-symbols-outlined text-[15px]">workspace_premium</span>
+                                <span>Make Team Lead</span>
+                              </button>
+                            )}
+
+                            {user.role !== 'member' && (
+                              <button
+                                onClick={() => handleRoleChange(user, 'member')}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs text-[#006b2c] hover:bg-[#7ffc97]/30 transition-colors text-left font-medium cursor-pointer"
+                              >
+                                <span className="material-symbols-outlined text-[15px]">person</span>
+                                <span>Make Team Member</span>
+                              </button>
+                            )}
+
+                            <div className="h-px bg-[#eaedff] my-1"></div>
+
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(user.email);
+                                setOpenUserMenuId(null);
+                                setToastMessage(`Copied email for ${user.name}!`);
+                                setTimeout(() => setToastMessage(null), 3000);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-[#3e4a3d] hover:bg-[#f2f3ff] hover:text-[#131b2e] transition-colors text-left font-medium cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[15px] text-[#6e7b6c]">mail</span>
+                              <span>Copy Email</span>
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(user.id);
+                                setOpenUserMenuId(null);
+                                setToastMessage(`Copied user ID for ${user.name}!`);
+                                setTimeout(() => setToastMessage(null), 3000);
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-[#3e4a3d] hover:bg-[#f2f3ff] hover:text-[#131b2e] transition-colors text-left font-medium cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[15px] text-[#6e7b6c]">badge</span>
+                              <span>Copy User ID</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>

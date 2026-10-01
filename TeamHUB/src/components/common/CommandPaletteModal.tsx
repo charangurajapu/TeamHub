@@ -137,7 +137,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
                   className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left hover:bg-[#f2f3ff] text-xs font-medium text-[#131b2e] transition-colors cursor-pointer"
                 >
                   <span className="material-symbols-outlined text-[18px] text-[#006b2c]">auto_awesome</span>
-                  <span>AI Copilot Workspace</span>
+                  <span>AI Assistant Workspace</span>
                 </button>
               </div>
             </div>

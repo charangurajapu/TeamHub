@@ -1,36 +1,96 @@
 @import "tailwindcss";
 
+@theme {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-dim: var(--surface-dim);
+  --color-surface-bright: var(--surface-bright);
+  --color-surface-container-lowest: var(--surface-container-lowest);
+  --color-surface-container-low: var(--surface-container-low);
+  --color-surface-container: var(--surface-container);
+  --color-surface-container-high: var(--surface-container-high);
+  --color-surface-container-highest: var(--surface-container-highest);
+
+  --color-primary: var(--primary);
+  --color-primary-container: var(--primary-container);
+  --color-primary-fixed: var(--primary-fixed);
+  --color-primary-fixed-dim: var(--primary-fixed-dim);
+  --color-on-primary: var(--on-primary);
+  --color-on-primary-container: var(--on-primary-container);
+  --color-on-primary-fixed: var(--on-primary-fixed);
+  --color-on-primary-fixed-variant: var(--on-primary-fixed-variant);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-container: var(--secondary-container);
+  --color-secondary-fixed: var(--secondary-fixed);
+  --color-secondary-fixed-dim: var(--secondary-fixed-dim);
+  --color-on-secondary: var(--on-secondary);
+  --color-on-secondary-container: var(--on-secondary-container);
+  --color-on-secondary-fixed: var(--on-secondary-fixed);
+  --color-on-secondary-fixed-variant: var(--on-secondary-fixed-variant);
+
+  --color-tertiary: var(--tertiary);
+  --color-tertiary-container: var(--tertiary-container);
+  --color-tertiary-fixed: var(--tertiary-fixed);
+  --color-tertiary-fixed-dim: var(--tertiary-fixed-dim);
+  --color-on-tertiary: var(--on-tertiary);
+  --color-on-tertiary-container: var(--on-tertiary-container);
+  --color-on-tertiary-fixed: var(--on-tertiary-fixed);
+  --color-on-tertiary-fixed-variant: var(--on-tertiary-fixed-variant);
+
+  --color-error: var(--error);
+  --color-error-container: var(--error-container);
+  --color-on-error: var(--on-error);
+  --color-on-error-container: var(--on-error-container);
+
+  --color-on-surface: var(--on-surface);
+  --color-on-surface-variant: var(--on-surface-variant);
+  --color-outline: var(--outline);
+  --color-outline-variant: var(--outline-variant);
+}
+
 @layer base {
   :root {
     --primary: #006b2c;
     --primary-container: #00873a;
     --primary-fixed: #7ffc97;
+    --primary-fixed-dim: #4ae176;
     --on-primary: #ffffff;
+    --on-primary-container: #ffffff;
     --on-primary-fixed: #002109;
     --on-primary-fixed-variant: #005320;
     
+    --background: #faf8ff;
     --surface: #faf8ff;
     --surface-container-lowest: #ffffff;
     --surface-container-low: #f2f3ff;
     --surface-container: #eaedff;
     --surface-container-high: #e2e7ff;
     --surface-container-highest: #dae2fd;
+    --surface-bright: #ffffff;
     --surface-dim: #d2d9f4;
     
-    --secondary: #0051d5;
-    --secondary-container: #316bf3;
+    --secondary: #6e7b6c;
+    --secondary-container: #eaedff;
     --secondary-fixed: #dbe1ff;
     --secondary-fixed-dim: #b4c5ff;
+    --on-secondary: #ffffff;
+    --on-secondary-container: #131b2e;
     --on-secondary-fixed: #00174b;
+    --on-secondary-fixed-variant: #3e475a;
     
     --tertiary: #8d4b00;
     --tertiary-container: #b15f00;
     --tertiary-fixed: #ffdcc3;
     --tertiary-fixed-dim: #ffb77d;
+    --on-tertiary: #ffffff;
+    --on-tertiary-container: #ffffff;
     --on-tertiary-fixed: #2f1500;
+    --on-tertiary-fixed-variant: #7f2a21;
     
     --error: #ba1a1a;
     --error-container: #ffdad6;
+    --on-error: #ffffff;
     --on-error-container: #93000a;
     
     --on-surface: #131b2e;
@@ -39,10 +99,63 @@
     --outline-variant: #bdcaba;
   }
 
+  /* Stitch-generated Dark Mode ("Midnight") Specification */
+  html.dark,
+  :root.dark,
+  .dark {
+    --background: #0b1326;
+    --surface: #0b1326;
+    --surface-dim: #0b1326;
+    --surface-container-lowest: #060e20;
+    --surface-container-low: #131b2e;
+    --surface-container: #171f33;
+    --surface-container-high: #222a3d;
+    --surface-container-highest: #2d3449;
+    --surface-bright: #31394d;
+
+    --primary: #4be277;
+    --primary-container: #22c55e;
+    --primary-fixed: #6bff8f;
+    --primary-fixed-dim: #4ae176;
+    --on-primary: #003915;
+    --on-primary-container: #004b1e;
+    --on-primary-fixed: #002109;
+    --on-primary-fixed-variant: #005321;
+
+    --secondary: #bcc7de;
+    --secondary-container: #3e495d;
+    --secondary-fixed: #d8e3fb;
+    --secondary-fixed-dim: #bcc7de;
+    --on-secondary: #263143;
+    --on-secondary-container: #aeb9d0;
+    --on-secondary-fixed: #111c2d;
+    --on-secondary-fixed-variant: #3c475a;
+
+    --tertiary: #ffb5ab;
+    --tertiary-container: #ff8b7c;
+    --tertiary-fixed: #ffdad5;
+    --tertiary-fixed-dim: #ffb4a9;
+    --on-tertiary: #60130d;
+    --on-tertiary-container: #76231b;
+    --on-tertiary-fixed: #410001;
+    --on-tertiary-fixed-variant: #7f2a21;
+
+    --error: #ffb4ab;
+    --error-container: #93000a;
+    --on-error: #690005;
+    --on-error-container: #ffdad6;
+
+    --on-surface: #dae2fd;
+    --on-surface-variant: #bccbb9;
+    --outline: #869585;
+    --outline-variant: #3d4a3d;
+  }
+
   body {
     font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     background-color: var(--surface);
     color: var(--on-surface);
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 
   .material-symbols-outlined {
@@ -78,6 +191,13 @@
     background: #6e7b6c;
   }
 
+  .dark ::-webkit-scrollbar-thumb {
+    background: #2d3449;
+  }
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: #3e495d;
+  }
+
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
@@ -85,4 +205,244 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+}
+
+/* =========================================================================
+   DARK MODE ("MIDNIGHT") GLOBAL ADAPTATION LAYER
+   Automatically adapts all components, legacy class names, cards, modals,
+   and surfaces to the exact Stitch Midnight palette.
+   ========================================================================= */
+
+.dark {
+  color-scheme: dark;
+}
+
+/* Card and Container Backgrounds */
+.dark .bg-white,
+.dark .bg-\[\#ffffff\],
+.dark .bg-\[\#ffffff\]\/95,
+.dark .bg-\[\#ffffff\]\/80 {
+  background-color: var(--surface-container) !important;
+}
+
+/* Page Background */
+.dark .bg-\[\#faf8ff\] {
+  background-color: var(--surface) !important;
+}
+
+/* Secondary & Nested Containers */
+.dark .bg-\[\#f2f3ff\],
+.dark .bg-\[\#f2f3ff\]\/80,
+.dark .bg-\[\#f2f3ff\]\/60 {
+  background-color: var(--surface-container-low) !important;
+}
+
+/* Elevated Containers & Badges */
+.dark .bg-\[\#eaedff\],
+.dark .bg-\[\#eaedff\]\/60,
+.dark .bg-\[\#eaedff\]\/50 {
+  background-color: var(--surface-container-high) !important;
+}
+
+.dark .bg-\[\#e2e7ff\],
+.dark .bg-\[\#e2e7ff\]\/60 {
+  background-color: var(--surface-container-highest) !important;
+}
+
+.dark .bg-\[\#dae2fd\] {
+  background-color: var(--surface-bright) !important;
+}
+
+/* Header & Glass Backdrops */
+.dark header.bg-\[\#ffffff\]\/90,
+.dark header.bg-white\/90,
+.dark .bg-\[\#ffffff\]\/90,
+.dark .bg-white\/90 {
+  background-color: rgba(23, 31, 51, 0.88) !important;
+}
+
+/* Borders */
+.dark .border-\[\#eaedff\],
+.dark .border-\[\#dae2fd\],
+.dark .border-\[\#e2e7ff\],
+.dark .border-\[\#eaedff\]\/80,
+.dark .border-\[\#eaedff\]\/60,
+.dark .border-\[\#eaedff\]\/50,
+.dark .border-\[\#eaedff\]\/40 {
+  border-color: rgba(62, 73, 93, 0.45) !important;
+}
+
+.dark .divide-\[\#eaedff\] > * + * {
+  border-color: rgba(62, 73, 93, 0.45) !important;
+}
+
+/* Text Colors */
+.dark .text-\[\#131b2e\] {
+  color: var(--on-surface) !important;
+}
+
+.dark .text-\[\#3e4a3d\] {
+  color: var(--on-surface-variant) !important;
+}
+
+.dark .text-\[\#6e7b6c\] {
+  color: var(--secondary) !important;
+}
+
+/* Brand Accent Colors */
+.dark .text-\[\#006b2c\] {
+  color: var(--primary) !important;
+}
+
+.dark .text-\[\#00873a\] {
+  color: var(--primary-fixed-dim) !important;
+}
+
+.dark .text-\[\#005320\] {
+  color: var(--primary) !important;
+}
+
+.dark .text-\[\#002109\] {
+  color: #002109 !important;
+}
+
+.dark .bg-\[\#006b2c\] {
+  background-color: var(--primary-container) !important;
+  color: var(--on-primary-container) !important;
+}
+
+.dark .hover\:bg-\[\#00873a\]:hover {
+  background-color: var(--primary) !important;
+}
+
+.dark .bg-\[\#7ffc97\],
+.dark .bg-\[\#7ffc97\]\/30,
+.dark .bg-\[\#7ffc97\]\/20 {
+  background-color: rgba(34, 197, 94, 0.2) !important;
+  color: var(--primary) !important;
+}
+
+.dark .border-\[\#7ffc97\] {
+  border-color: rgba(75, 226, 119, 0.45) !important;
+}
+
+.dark .border-\[\#006b2c\] {
+  border-color: var(--primary-container) !important;
+}
+
+/* Hover Backgrounds */
+.dark .hover\:bg-\[\#f2f3ff\]:hover,
+.dark .hover\:bg-\[\#eaedff\]:hover,
+.dark .hover\:bg-\[\#e2e7ff\]:hover {
+  background-color: var(--surface-container-high) !important;
+}
+
+.dark .hover\:bg-\[\#ffffff\]:hover,
+.dark .hover\:bg-white:hover {
+  background-color: var(--surface-container-high) !important;
+}
+
+.dark .hover\:text-\[\#131b2e\]:hover {
+  color: var(--on-surface) !important;
+}
+
+.dark .hover\:text-\[\#006b2c\]:hover {
+  color: var(--primary) !important;
+}
+
+/* Form Inputs, Selects, and Textareas */
+.dark input[type="text"],
+.dark input[type="email"],
+.dark input[type="password"],
+.dark input[type="search"],
+.dark textarea,
+.dark select {
+  background-color: var(--surface-container-lowest) !important;
+  color: var(--on-surface) !important;
+  border-color: rgba(62, 73, 93, 0.7) !important;
+}
+
+.dark input[type="text"]:focus,
+.dark input[type="email"]:focus,
+.dark input[type="password"]:focus,
+.dark input[type="search"]:focus,
+.dark textarea:focus,
+.dark select:focus {
+  border-color: var(--primary-container) !important;
+  box-shadow: 0 0 0 1px var(--primary-container) !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #869585 !important;
+}
+
+/* Checkbox and Radios */
+.dark input[type="checkbox"],
+.dark input[type="radio"] {
+  accent-color: var(--primary-container);
+}
+
+/* Shadows in Dark Mode */
+.dark .shadow-xs,
+.dark .shadow-2xs,
+.dark .shadow-sm {
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px -1px rgba(0, 0, 0, 0.4) !important;
+}
+
+.dark .shadow-md {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5) !important;
+}
+
+.dark .shadow-lg,
+.dark .shadow-xl,
+.dark .shadow-2xl {
+  box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.65), 0 4px 10px -4px rgba(0, 0, 0, 0.65) !important;
+}
+
+/* Modals, Flyouts & Drawers */
+.dark .shadow-xl.bg-white,
+.dark .shadow-xl.bg-\[\#ffffff\],
+.dark .shadow-2xl.bg-white,
+.dark .shadow-2xl.bg-\[\#ffffff\] {
+  background-color: var(--surface-container) !important;
+  border: 1px solid rgba(62, 73, 93, 0.5) !important;
+}
+
+/* Dropdown menus (3-dot menus, profile menu) */
+.dark [role="menu"],
+.dark .dropdown-menu {
+  background-color: var(--surface-container) !important;
+  border-color: rgba(62, 73, 93, 0.5) !important;
+}
+
+/* Tables */
+.dark table thead tr {
+  background-color: var(--surface-container-low) !important;
+  border-color: rgba(62, 73, 93, 0.45) !important;
+}
+
+.dark table thead th {
+  color: var(--secondary) !important;
+}
+
+.dark table tbody tr {
+  border-color: rgba(62, 73, 93, 0.35) !important;
+}
+
+.dark table tbody tr:hover {
+  background-color: var(--surface-container-high) !important;
+}
+
+/* Channel active item highlight */
+.dark .channel-active {
+  background-color: #132e22 !important;
+  color: var(--primary) !important;
+  border-left-color: var(--primary-container) !important;
+}
+
+/* AI Assistant Callout */
+.dark .ai-callout {
+  background-color: #132e22 !important;
+  border-color: rgba(34, 197, 94, 0.4) !important;
 }

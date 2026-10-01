@@ -376,7 +376,7 @@ export const USERS: Record<string, User> = {
     name: 'TeamHub AI',
     email: 'ai@teamhub.internal',
     role: 'member',
-    roleTitle: 'Synthetic Copilot & Knowledge Engine',
+    roleTitle: 'Synthetic AI Assistant & Knowledge Engine',
     department: 'Intelligence',
     pod: 'Workspace Index',
     initials: 'AI',
@@ -394,7 +394,7 @@ export const USERS: Record<string, User> = {
 };
 
 export const CHANNELS: Channel[] = [
-  { id: 'general', name: 'general', description: 'Company-wide announcements and team updates', unreadCount: 3, membersCount: 24, icon: 'campaign' },
+  { id: 'general', name: 'general', description: 'Company-wide announcements and team updates', unreadCount: 3, membersCount: 24, icon: 'campaign', isProtected: true, isMandatory: true },
   { id: 'data', name: 'data', description: 'Data pipeline discussions, telemetry, and analytics queries', unreadCount: 1, membersCount: 16, icon: 'analytics' },
   { id: 'design', name: 'design', description: 'UI tokens, component architecture, and cross-functional design review', unreadCount: 0, membersCount: 8, icon: 'tag' },
   { id: 'frontend', name: 'frontend', description: 'React, Next.js, and client-side performance benchmarks', unreadCount: 5, membersCount: 14, icon: 'code' },
@@ -406,6 +406,8 @@ export const CHANNELS: Channel[] = [
 export const INITIAL_CHANNEL_MESSAGES: ChannelMessage[] = [
   {
     id: 'msg-1',
+    channelId: 'general',
+    channel_id: 'general',
     author: USERS.sarah,
     createdAt: '10:14 AM',
     tag: 'Product',
@@ -440,6 +442,8 @@ export const INITIAL_CHANNEL_MESSAGES: ChannelMessage[] = [
   },
   {
     id: 'msg-2',
+    channelId: 'general',
+    channel_id: 'general',
     author: USERS.david,
     createdAt: '10:28 AM',
     tag: 'Lead',
@@ -467,6 +471,8 @@ export const INITIAL_CHANNEL_MESSAGES: ChannelMessage[] = [
   },
   {
     id: 'msg-3',
+    channelId: 'design',
+    channel_id: 'design',
     author: USERS.ai,
     createdAt: '10:31 AM',
     isAi: true,

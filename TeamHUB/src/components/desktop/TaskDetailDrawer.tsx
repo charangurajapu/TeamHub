@@ -1,8 +1,13 @@
-import React, { useState } from 'react';
-import { Task, TaskStatus, Subtask } from '../../types';
+import React, { useState, useMemo } from 'react';
+import { Task, TaskStatus, Subtask, User, Project } from '../../types';
+import { getEligibleTaskAssignees } from '../../lib/supabase';
+import { USERS } from '../../data/mockData';
 
 interface TaskDetailDrawerProps {
   task: Task | null;
+  currentUser?: User;
+  projects?: Project[];
+  allUsers?: Record<string, User> | User[];
   onClose: () => void;
   onUpdateTask: (updated: Task) => void;
   onOpenAiDrawer: () => void;
@@ -10,6 +15,9 @@ interface TaskDetailDrawerProps {
 
 export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   task,
+  currentUser,
+  projects,
+  allUsers,
   onClose,
   onUpdateTask,
   onOpenAiDrawer,
@@ -20,6 +28,29 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
   const [newSubtaskInput, setNewSubtaskInput] = useState('');
   const [isAddingSubtask, setIsAddingSubtask] = useState(false);
   const [isAiSuggesting, setIsAiSuggesting] = useState(false);
+  const [isEditingAssignee, setIsEditingAssignee] = useState(false);
+
+  const eligibleAssignees = useMemo(() => {
+    if (!currentUser) return [];
+    return getEligibleTaskAssignees(currentUser, task.projectId, allUsers || USERS, projects || []);
+  }, [currentUser, task.projectId, allUsers, projects]);
+
+  const canEditAssignee = currentUser && (currentUser.role === 'admin' || currentUser.role === 'lead');
+
+  const projectName = useMemo(() => {
+    if (!task.projectId || !projects) return '';
+    const p = projects.find((proj) => proj.id === task.projectId);
+    return p ? p.name : '';
+  }, [task.projectId, projects]);
+
+  const handleAssigneeChange = (newUserId: string) => {
+    const allList = Array.isArray(allUsers) ? allUsers : Object.values(allUsers || USERS);
+    const found = eligibleAssignees.find((u) => u.id === newUserId) || allList.find((u) => u.id === newUserId);
+    if (found) {
+      onUpdateTask({ ...task, assignee: found });
+      setIsEditingAssignee(false);
+    }
+  };
 
   const toggleSubtask = (subtaskId: string) => {
     const updatedSubtasks = task.subtasks.map((st) =>
@@ -159,18 +190,52 @@ export const TaskDetailDrawer: React.FC<TaskDetailDrawerProps> = ({
           {/* Key Properties Grid */}
           <div className="grid grid-cols-2 gap-3 p-4 rounded-2xl bg-[#f2f3ff] border border-[#eaedff]">
             <div className="flex flex-col gap-1">
-              <span className="text-[11px] text-[#6e7b6c]">Assignee</span>
-              <div className="flex items-center gap-2 mt-0.5">
-                <div className="w-6 h-6 rounded-full bg-[#7ffc97] text-[#002109] font-bold text-[10px] flex items-center justify-center">
-                  {task.assignee.initials}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-bold text-[#131b2e]">{task.assignee.name}</span>
-                  <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#ffffff] text-[#6e7b6c]">
-                    {task.assignee.department.split(' ')[0]}
-                  </span>
-                </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-[#6e7b6c]">Assignee</span>
+                {canEditAssignee && (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingAssignee(!isEditingAssignee)}
+                    className="text-[10px] text-[#0051d5] hover:underline font-semibold cursor-pointer"
+                  >
+                    {isEditingAssignee ? 'Cancel' : 'Change'}
+                  </button>
+                )}
               </div>
+              {isEditingAssignee ? (
+                <div className="mt-1 space-y-1">
+                  <select
+                    value={task.assignee.id}
+                    onChange={(e) => handleAssigneeChange(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-xl bg-white border border-[#dbe1ff] text-xs text-[#131b2e] focus:outline-none shadow-xs"
+                  >
+                    {eligibleAssignees.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} ({u.roleTitle || u.department})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-[#6e7b6c] truncate">
+                    {currentUser?.role === 'lead'
+                      ? `Scoped to pod: ${currentUser.pod || 'Own Pod'}`
+                      : task.projectId
+                      ? `Scoped to project: ${projectName || task.projectId}`
+                      : 'Workspace-wide (no project)'}
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 mt-0.5">
+                  <div className="w-6 h-6 rounded-full bg-[#7ffc97] text-[#002109] font-bold text-[10px] flex items-center justify-center">
+                    {task.assignee.initials}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-[#131b2e]">{task.assignee.name}</span>
+                    <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#ffffff] text-[#6e7b6c]">
+                      {task.assignee.department ? task.assignee.department.split(' ')[0] : 'Team'}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col gap-1">

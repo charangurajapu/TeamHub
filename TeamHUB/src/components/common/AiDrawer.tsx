@@ -3,6 +3,7 @@ import { USERS } from '../../data/mockData';
 import { User } from '../../types';
 import { generateGeminiAssistantResponse } from '../../lib/gemini';
 import { AiDocPreviewPanel } from './AiDocPreviewPanel';
+import { useSidebar } from '../../context/SidebarContext';
 
 interface AiDrawerProps {
   isOpen: boolean;
@@ -11,6 +12,7 @@ interface AiDrawerProps {
   onNavigate?: (view: any, itemId?: string) => void;
   onInsertToTask?: (text: string) => void;
   onPostToStandup?: (update: { done: string; doing: string; blocked: string }) => void;
+  initialPrompt?: string;
 }
 
 interface Message {
@@ -28,7 +30,9 @@ export const AiDrawer: React.FC<AiDrawerProps> = ({
   onNavigate,
   onInsertToTask,
   onPostToStandup,
+  initialPrompt,
 }) => {
+  const { isCollapsed } = useSidebar();
   const [showDocPreview, setShowDocPreview] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -62,6 +66,12 @@ export const AiDrawer: React.FC<AiDrawerProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isThinking, setIsThinking] = useState(false);
   const chatStreamRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isOpen && initialPrompt) {
+      setInputPrompt(initialPrompt);
+    }
+  }, [isOpen, initialPrompt]);
 
   useEffect(() => {
     if (chatStreamRef.current) {
@@ -118,7 +128,9 @@ export const AiDrawer: React.FC<AiDrawerProps> = ({
       <>
         {/* Semi-transparent interactive backdrop overlay */}
         <div
-          className="fixed inset-0 top-16 left-0 lg:left-[260px] bg-[#131b2e]/25 backdrop-blur-[2px] z-40 transition-opacity animate-in fade-in cursor-pointer"
+          className={`fixed inset-0 top-16 left-0 ${
+            isCollapsed ? 'lg:left-[72px]' : 'lg:left-[260px]'
+          } bg-[#131b2e]/25 backdrop-blur-[2px] z-40 transition-all duration-300 ease-in-out animate-in fade-in cursor-pointer`}
           onClick={onClose}
         />
 
@@ -148,7 +160,9 @@ export const AiDrawer: React.FC<AiDrawerProps> = ({
     <>
       {/* Semi-transparent interactive backdrop overlay */}
       <div
-        className="fixed inset-0 top-16 left-0 lg:left-[260px] bg-[#131b2e]/25 backdrop-blur-[2px] z-40 transition-opacity animate-in fade-in"
+        className={`fixed inset-0 top-16 left-0 ${
+          isCollapsed ? 'lg:left-[72px]' : 'lg:left-[260px]'
+        } bg-[#131b2e]/25 backdrop-blur-[2px] z-40 transition-all duration-300 ease-in-out animate-in fade-in`}
         onClick={onClose}
       />
 

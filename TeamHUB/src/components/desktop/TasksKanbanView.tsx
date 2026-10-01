@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Task, TaskStatus, User } from '../../types';
 import { INITIAL_TASKS, USERS } from '../../data/mockData';
-import { fetchTasksFromDb, createTaskInDb, updateTaskInDb, isSupabaseConfigured, getLocalProjects } from '../../lib/supabase';
+import { fetchTasksFromDb, createTaskInDb, updateTaskInDb, isSupabaseConfigured, getLocalProjects, getEligibleTaskAssignees } from '../../lib/supabase';
 import { TaskDetailDrawer } from './TaskDetailDrawer';
 
 interface TasksKanbanViewProps {
@@ -51,7 +51,39 @@ export const TasksKanbanView: React.FC<TasksKanbanViewProps> = ({
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDesc, setNewTaskDesc] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<'high' | 'medium' | 'low'>('medium');
-  const [newTaskAssignee, setNewTaskAssignee] = useState<string>('david');
+  const [newTaskProjectId, setNewTaskProjectId] = useState<string>(selectedProjectId || '');
+  const [newTaskAssignee, setNewTaskAssignee] = useState<string>(currentUser.id);
+
+  // Sync newTaskProjectId whenever selectedProjectId changes
+  useEffect(() => {
+    if (selectedProjectId) {
+      setNewTaskProjectId(selectedProjectId);
+    }
+  }, [selectedProjectId]);
+
+  // Dynamically compute eligible assignees scoped by role:
+  // - Lead: Only own pod members
+  // - Admin: Only members of the chosen project (or all workspace members if no project)
+  const eligibleAssignees = useMemo(() => {
+    return getEligibleTaskAssignees(
+      currentUser,
+      newTaskProjectId || selectedProjectId || null,
+      USERS,
+      getLocalProjects()
+    );
+  }, [currentUser, newTaskProjectId, selectedProjectId]);
+
+  // Keep newTaskAssignee valid when project/scope changes
+  useEffect(() => {
+    if (eligibleAssignees.length > 0) {
+      const isCurrentValid = eligibleAssignees.some(
+        (u) => u.id === newTaskAssignee || (USERS[newTaskAssignee] && USERS[newTaskAssignee].id === u.id)
+      );
+      if (!isCurrentValid) {
+        setNewTaskAssignee(eligibleAssignees[0].id);
+      }
+    }
+  }, [eligibleAssignees, newTaskAssignee]);
 
   const handleUpdateTask = async (updated: Task) => {
     setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
@@ -83,7 +115,14 @@ export const TasksKanbanView: React.FC<TasksKanbanViewProps> = ({
     e.preventDefault();
     if (!newTaskTitle.trim()) return;
 
-    const assignedUser = USERS[newTaskAssignee] || currentUser;
+    const allUsersList = Object.values(USERS);
+    const assignedUser =
+      eligibleAssignees.find((u) => u.id === newTaskAssignee) ||
+      allUsersList.find((u) => u.id === newTaskAssignee) ||
+      USERS[newTaskAssignee] ||
+      currentUser;
+
+    const effectiveProjectId = newTaskProjectId || selectedProjectId || undefined;
 
     const created: Task = {
       id: `task-${Date.now()}`,
@@ -95,7 +134,7 @@ export const TasksKanbanView: React.FC<TasksKanbanViewProps> = ({
       channel: '#backend',
       sprint: 'Sprint 42',
       assignee: assignedUser,
-      projectId: selectedProjectId || undefined,
+      projectId: effectiveProjectId,
       dueDate: '2025-10-31',
       subtasks: [],
       attachments: [],
@@ -622,6 +661,9 @@ export const TasksKanbanView: React.FC<TasksKanbanViewProps> = ({
       {/* Slide-out Task Details Drawer */}
       <TaskDetailDrawer
         task={activeTask}
+        currentUser={currentUser}
+        projects={getLocalProjects()}
+        allUsers={USERS}
         onClose={() => setActiveTask(null)}
         onUpdateTask={handleUpdateTask}
         onOpenAiDrawer={onOpenAiDrawer}
@@ -674,19 +716,60 @@ export const TasksKanbanView: React.FC<TasksKanbanViewProps> = ({
                 />
               </div>
 
+              {/* Project Selector for Administrator */}
+              {currentUser.role === 'admin' && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-semibold text-[#131b2e]">Project Scope</label>
+                    <span className="text-[10px] text-[#6e7b6c]">Assignees will scope to this project</span>
+                  </div>
+                  <select
+                    value={newTaskProjectId}
+                    onChange={(e) => setNewTaskProjectId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#f2f3ff] border border-[#eaedff] text-xs text-[#131b2e] focus:outline-none"
+                  >
+                    <option value="">-- No Project (Workspace Wide) --</option>
+                    {getLocalProjects().map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.pod})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Pod Banner for Team Lead */}
+              {currentUser.role === 'lead' && (
+                <div className="flex items-center gap-2 p-2.5 rounded-xl bg-[#eaedff] text-[#0051d5] text-[11px] font-medium border border-[#dbe1ff]">
+                  <span className="material-symbols-outlined text-[16px]">groups</span>
+                  <span>
+                    Scoped to your pod: <strong>{currentUser.pod || 'Own Pod'}</strong> ({eligibleAssignees.length} members eligible)
+                  </span>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-[#131b2e] mb-1">Assignee</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-semibold text-[#131b2e]">Assignee</label>
+                    <span className="text-[10px] text-[#6e7b6c]">
+                      {currentUser.role === 'lead'
+                        ? 'Pod only'
+                        : newTaskProjectId
+                        ? `Project (${eligibleAssignees.length})`
+                        : `All (${eligibleAssignees.length})`}
+                    </span>
+                  </div>
                   <select
                     value={newTaskAssignee}
                     onChange={(e) => setNewTaskAssignee(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-[#f2f3ff] border border-[#eaedff] text-xs text-[#131b2e] focus:outline-none"
                   >
-                    <option value="david">David Kim (Arch Lead)</option>
-                    <option value="anya">Anya Lin (Backend)</option>
-                    <option value="marcus">Marcus Reed (Design)</option>
-                    <option value="elena">Elena Rostova (Mobile)</option>
-                    <option value="sarah">Sarah Connor (Product)</option>
+                    {eligibleAssignees.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.name} ({user.roleTitle || user.department})
+                      </option>
+                    ))}
                   </select>
                 </div>
 

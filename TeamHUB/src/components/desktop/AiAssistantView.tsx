@@ -2,6 +2,11 @@ import React, { useState } from 'react';
 import { User, ViewMode } from '../../types';
 import { generateGeminiAssistantResponse } from '../../lib/gemini';
 import { AiDocPreviewPanel } from '../common/AiDocPreviewPanel';
+import { useSidebar } from '../../context/SidebarContext';
+
+import { ChatHeader } from './ai/ChatHeader';
+import { MessageList, ChatMessage } from './ai/MessageList';
+import { ChatInput } from './ai/ChatInput';
 
 interface AiAssistantViewProps {
   currentUser: User;
@@ -9,39 +14,54 @@ interface AiAssistantViewProps {
 }
 
 export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ currentUser, onNavigate }) => {
-  const [activeSession, setActiveSession] = useState('sprint-42');
+  const { isCollapsed } = useSidebar();
   const [showDocPreview, setShowDocPreview] = useState(false);
-  const [messages, setMessages] = useState([
+  const [messages, setMessages] = useState<ChatMessage[]>([
     {
-      id: 'm-1',
+      id: 'm-seed-user',
       sender: 'user',
-      text: 'Can you summarize what the team accomplished yesterday on the onboarding redesign, and list any outstanding questions?',
-      time: 'Yesterday at 5:42 PM',
+      text: "Summarize the architectural consensus from yesterday's Redis cluster failover discussion in #backend.",
+      time: '10:32 AM',
     },
     {
-      id: 'm-2',
+      id: 'm-seed-ai',
       sender: 'ai',
-      text: "Here is the summary of yesterday's onboarding progress based on 6 updates in #design and #frontend:",
-      time: 'Yesterday at 5:42 PM',
+      text: `### Key Decisions: Redis Multi-Region Failover Architecture
+
+Synthesized from yesterday's post-incident triage between **@marcus** and **@devon** regarding cross-DC replication latency:
+
+- **Lua Script Execution:** Swapped high-frequency client renew loops with atomic scripts executing directly on Redis nodes to avert distributed lease stampedes during transient splits.
+- **180s Proxy Buffer:** Envoy ingress buffers downstream mutations during master election phases, absorbing NTP jitter across active-active clusters without invoking global write locks.
+- **Fallback Sentinel Consensus:** Enforced quorum threshold to \`N/2 + 1\` with a minimum heartbeat variance cap of 450ms.
+
+\`\`\`lua
+-- atomic_lease_acquire.lua
+redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2], 'NX')
+\`\`\``,
+      time: '10:33 AM',
       isStructured: true,
     },
   ]);
 
   const [inputVal, setInputVal] = useState('');
-  const [taskCreated, setTaskCreated] = useState(false);
-  const [draftAnswerMode, setDraftAnswerMode] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Send message handler
   const handleSend = async (textToSend?: string) => {
-    const text = (textToSend || inputVal).trim();
+    const text = (textToSend !== undefined ? textToSend : inputVal).trim();
     if (!text || isThinking) return;
 
     setErrorMessage(null);
-    setMessages((prev) => [
-      ...prev,
-      { id: `u-${Date.now()}`, sender: 'user', text, time: 'Just now' },
-    ]);
+    const newMsgId = `u-${Date.now()}`;
+    const userMsg: ChatMessage = {
+      id: newMsgId,
+      sender: 'user',
+      text,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
     setInputVal('');
     setIsThinking(true);
 
@@ -51,315 +71,133 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({ currentUser, o
       text: m.text,
     }));
 
-    const result = await generateGeminiAssistantResponse(text, history);
-    setIsThinking(false);
+    try {
+      const result = await generateGeminiAssistantResponse(text, history);
+      setIsThinking(false);
 
-    if (result.error) {
-      setErrorMessage(result.error);
+      if (result.error) {
+        setErrorMessage(result.error);
+      }
+
+      const aiResponseText = result.text || 'Sorry, I was unable to generate a response.';
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `ai-${Date.now()}`,
+          sender: 'ai',
+          text: aiResponseText,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+    } catch (err: unknown) {
+      setIsThinking(false);
+      const errMsg = err instanceof Error ? err.message : 'An unexpected error occurred.';
+      setErrorMessage(errMsg);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `ai-err-${Date.now()}`,
+          sender: 'ai',
+          text: `⚠️ **Error generating response:** ${errMsg}`,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
     }
+  };
 
-    const aiResponseText = result.text || 'Sorry, I was unable to generate a response.';
+  // Regeneration logic for an assistant message
+  const handleRegenerate = (aiMsgIndex: number) => {
+    // Find the preceding user message
+    let precedingUserPrompt = '';
+    for (let i = aiMsgIndex - 1; i >= 0; i--) {
+      if (messages[i].sender === 'user') {
+        precedingUserPrompt = messages[i].text;
+        break;
+      }
+    }
+    if (precedingUserPrompt) {
+      handleSend(precedingUserPrompt);
+    }
+  };
 
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `ai-${Date.now()}`,
-        sender: 'ai',
-        text: aiResponseText,
-        time: 'Just now',
-      },
-    ]);
+  // Suggestion card interaction: either send immediately or populate input
+  const handleSelectPrompt = (prompt: string, shouldSendImmediately = true) => {
+    if (shouldSendImmediately) {
+      handleSend(prompt);
+    } else {
+      setInputVal(prompt);
+    }
+  };
+
+  // Reset conversation
+  const handleNewChat = () => {
+    setMessages([]);
+    setInputVal('');
+    setErrorMessage(null);
   };
 
   return (
-    <div className="flex flex-col w-full gap-6">
-      <div className="grid grid-cols-12 gap-6 items-start">
-        {/* Left History & Context Panel (4 cols) */}
-        <aside className="col-span-12 lg:col-span-4 flex flex-col gap-4">
-          <div className="bg-[#ffffff] rounded-2xl shadow-xs border border-[#eaedff] p-4 flex flex-col gap-4">
+    <div className="relative flex flex-col w-full min-h-[calc(100vh-5rem)] bg-surface text-on-surface">
+      {/* Slim Context Header Bar */}
+      <ChatHeader
+        onNewChat={handleNewChat}
+        onOpenDocPreview={() => setShowDocPreview(true)}
+      />
+
+      {/* Error notification banner if any */}
+      {errorMessage && (
+        <div className="max-w-4xl mx-auto w-full px-4 pt-3">
+          <div className="p-3 rounded-xl bg-error-container text-on-error-container text-xs flex items-center justify-between shadow-xs">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-[18px]">error</span>
+              <span>{errorMessage}</span>
+            </div>
             <button
-              onClick={() => {
-                setActiveSession('new');
-                setMessages([
-                  {
-                    id: 'm-new',
-                    sender: 'ai',
-                    text: 'New session started. How can I assist you with team engineering questions or sprint planning?',
-                    time: 'Just now',
-                  },
-                ]);
-              }}
-              className="w-full flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-[#f2f3ff] text-xs font-semibold text-[#131b2e] hover:bg-[#eaedff] hover:text-[#006b2c] transition-all cursor-pointer"
+              onClick={() => setErrorMessage(null)}
+              className="text-on-error-container hover:opacity-75 cursor-pointer font-bold px-1"
             >
-              <span className="material-symbols-outlined text-[18px]">add</span>
-              <span>New Conversation</span>
+              ✕
             </button>
-
-            {/* Sessions */}
-            <div className="space-y-1">
-              <span className="px-2 text-[10px] uppercase font-bold text-[#6e7b6c] tracking-wider block mb-1">
-                Recent Insights & Queries
-              </span>
-
-              {[
-                { id: 'sprint-42-doc', title: 'Sprint 42 Documentation (Draft)', time: 'Just now', isDoc: true },
-                { id: 'sprint-42', title: 'Sprint 42 Deliverables Summary', time: 'Just now' },
-                { id: 'redis-policy', title: 'Redis Cache Policy Solution', time: '2h ago' },
-                { id: 'tokens-plan', title: 'Design Tokens Refactoring Plan', time: 'Yesterday' },
-                { id: 'blocker-digest', title: 'Weekly Team Blocker Digest', time: '3d ago' },
-              ].map((sess) => (
-                <div
-                  key={sess.id}
-                  onClick={() => {
-                    if (sess.isDoc) {
-                      setShowDocPreview(true);
-                    } else {
-                      setActiveSession(sess.id);
-                      setShowDocPreview(false);
-                    }
-                  }}
-                  className={`flex items-center justify-between p-2.5 rounded-xl text-xs cursor-pointer transition-colors ${
-                    (sess.isDoc && showDocPreview) || (!showDocPreview && activeSession === sess.id)
-                      ? 'bg-[#eaedff] text-[#006b2c] font-semibold'
-                      : 'text-[#3e4a3d] hover:bg-[#f2f3ff]'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 truncate">
-                    <span
-                      className={`w-2 h-2 rounded-full shrink-0 ${
-                        (sess.isDoc && showDocPreview) || (!showDocPreview && activeSession === sess.id)
-                          ? 'bg-[#006b2c]'
-                          : 'bg-transparent'
-                      }`}
-                    ></span>
-                    <span className="truncate">{sess.title}</span>
-                  </div>
-                  <span className="text-[10px] text-[#6e7b6c] shrink-0">{sess.time}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Connected Sources */}
-            <div className="space-y-2 pt-2 border-t border-[#eaedff]">
-              <div className="flex items-center justify-between px-2 text-[10px] uppercase font-bold text-[#6e7b6c]">
-                <span>Knowledge Sources</span>
-                <span className="text-[#006b2c] font-semibold">Active</span>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                {['Channels', 'Tasks', 'Figma', 'GitHub'].map((src) => (
-                  <div key={src} className="p-2 rounded-xl bg-[#f2f3ff] flex items-center justify-between">
-                    <span className="text-xs font-medium text-[#131b2e]">{src}</span>
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#006b2c]"></span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Vector Store Capacity */}
-            <div className="p-3 rounded-xl bg-[#faf8ff] border border-[#eaedff] flex flex-col gap-1.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-[11px] text-[#3e4a3d]">Semantic Index</span>
-                <span className="text-[10px] font-bold text-[#006b2c]">74% Synced</span>
-              </div>
-              <div className="w-full bg-[#eaedff] h-1 rounded-full overflow-hidden">
-                <div className="bg-[#006b2c] h-full rounded-full" style={{ width: '74%' }}></div>
-              </div>
-              <span className="text-[10px] text-[#6e7b6c]">38 Docs, 142 Threads embedded</span>
-            </div>
           </div>
-        </aside>
+        </div>
+      )}
 
-        {/* Right Active Conversation & Intelligence Area (8 cols) */}
-        <section className="col-span-12 lg:col-span-8 flex flex-col gap-4">
-          {/* Header Card */}
-          <div className="bg-[#ffffff] rounded-2xl shadow-xs border border-[#eaedff] p-5 flex flex-col gap-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-xl font-bold text-[#131b2e] tracking-tight">AI Assistant</h1>
-                  <span className="px-2 py-0.5 rounded-full bg-[#7ffc97] text-[#005320] text-[10px] font-bold">
-                    Workspace Context
-                  </span>
-                </div>
-                <p className="text-xs text-[#6e7b6c] mt-0.5">
-                  Connected to Workspace Knowledge Base (4 Channels, 38 Docs)
-                </p>
-              </div>
-            </div>
+      {/* Main Scrollable Conversation Timeline */}
+      <main className="flex-1 w-full">
+        <MessageList
+          messages={messages}
+          currentUser={currentUser}
+          isThinking={isThinking}
+          onSelectPrompt={handleSelectPrompt}
+          onRegenerate={handleRegenerate}
+          onSaveToFiles={() => setShowDocPreview(true)}
+        />
+      </main>
 
-            {/* Action Chips */}
-            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pt-1">
-              <button
-                onClick={() => setShowDocPreview(true)}
-                className="shrink-0 flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-[#006b2c] text-white text-xs font-semibold hover:bg-[#00873a] transition-all shadow-xs cursor-pointer active:scale-95"
-              >
-                <span className="material-symbols-outlined text-[15px] text-[#7ffc97]">magic_button</span>
-                <span>Document our teamwork</span>
-              </button>
-              <button
-                onClick={() => handleSend("Summarize today's updates")}
-                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f2f3ff] text-xs font-medium text-[#131b2e] hover:bg-[#eaedff] transition-colors cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[15px] text-[#006b2c]">auto_awesome</span>
-                <span>Summarize today's updates</span>
-              </button>
-              <button
-                onClick={() => handleSend('Draft task from question')}
-                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f2f3ff] text-xs font-medium text-[#131b2e] hover:bg-[#eaedff] transition-colors cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[15px] text-[#006b2c]">assignment_add</span>
-                <span>Draft task from question</span>
-              </button>
-              <button
-                onClick={() => handleSend('Identify blockers')}
-                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#f2f3ff] text-xs font-medium text-[#131b2e] hover:bg-[#eaedff] transition-colors cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[15px] text-[#006b2c]">warning_amber</span>
-                <span>Identify blockers</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Chat Stream */}
-          <div className="space-y-4">
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex items-start gap-3 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                {msg.sender === 'ai' && (
-                  <div className="w-8 h-8 rounded-full bg-[#006b2c] text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs mt-1">
-                    AI
-                  </div>
-                )}
-
-                <div
-                  className={`flex flex-col gap-2 max-w-2xl ${
-                    msg.sender === 'user' ? 'items-end' : 'items-start w-full'
-                  }`}
-                >
-                  <div
-                    className={`p-4 rounded-2xl text-xs leading-relaxed ${
-                      msg.sender === 'user'
-                        ? 'bg-[#006b2c] text-white rounded-tr-xs shadow-xs'
-                        : 'bg-[#ffffff] text-[#131b2e] border border-[#eaedff] rounded-tl-xs shadow-xs w-full'
-                    }`}
-                  >
-                    <p className="whitespace-pre-line">{msg.text}</p>
-
-                    {msg.isStructured && (
-                      <div className="mt-3 space-y-2.5">
-                        {/* Highlights */}
-                        <div className="p-3 rounded-xl bg-[#f2f3ff] flex items-start gap-2.5 border border-[#eaedff]">
-                          <span className="material-symbols-outlined text-[#006b2c] text-[18px]">palette</span>
-                          <div className="flex-1">
-                            <span className="font-bold text-[#131b2e]">
-                              Marcus completed high-fidelity user flows for customer onboarding v2.4.
-                            </span>
-                            <span className="text-[10px] text-[#6e7b6c] block mt-0.5">
-                              Figma: "Onboarding Flow v2.4" • Updated 4:15 PM
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="p-3 rounded-xl bg-[#f2f3ff] flex items-start gap-2.5 border border-[#eaedff]">
-                          <span className="material-symbols-outlined text-[#006b2c] text-[18px]">terminal</span>
-                          <div className="flex-1">
-                            <span className="font-bold text-[#131b2e]">
-                              David verified API payload contracts for auth endpoints.
-                            </span>
-                            <span className="text-[10px] text-[#6e7b6c] block mt-0.5">
-                              PR #388: "feat(auth): validate onboarding claims payload" • Merged
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Outstanding question action box */}
-                        <div className="p-4 rounded-xl bg-[#f2f3ff] border border-[#eaedff] space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-xs text-[#131b2e] flex items-center gap-1.5">
-                              <span className="material-symbols-outlined text-[#8d4b00] text-[18px]">help</span>
-                              1 Outstanding Team Question
-                            </span>
-                            <span className="px-2 py-0.2 rounded-full text-[10px] bg-[#eaedff] text-[#3e4a3d] font-semibold">
-                              To Do
-                            </span>
-                          </div>
-                          <p className="text-xs text-[#3e4a3d] bg-white p-2.5 rounded-lg border border-[#eaedff]">
-                            "TanStack Virtual vs react-window benchmarks for 10k activity feed items."
-                          </p>
-
-                          <div className="flex items-center gap-2 pt-1">
-                            <button
-                              onClick={() => {
-                                setDraftAnswerMode(true);
-                                handleSend("Draft answer comparing TanStack Virtual and react-window");
-                              }}
-                              className="px-3 py-1.5 rounded-xl bg-[#006b2c] text-white text-xs font-semibold hover:bg-[#00873a] transition-all shadow-xs cursor-pointer"
-                            >
-                              Draft Answer with AI
-                            </button>
-                            <button
-                              onClick={() => {
-                                setTaskCreated(true);
-                              }}
-                              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border border-[#eaedff] ${
-                                taskCreated ? 'bg-[#7ffc97] text-[#005320]' : 'bg-white text-[#131b2e] hover:bg-[#eaedff]'
-                              }`}
-                            >
-                              {taskCreated ? 'Task Created (#429) ✓' : 'Convert to Task'}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <span className="text-[10px] text-[#6e7b6c] pr-1">{msg.time}</span>
-                </div>
-
-                {msg.sender === 'user' && (
-                  <div className="w-8 h-8 rounded-full bg-[#eaedff] text-[#006b2c] flex items-center justify-center font-bold text-xs shrink-0 shadow-xs mt-1">
-                    SC
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {/* Floating Prompt Bar */}
-          <div className="sticky bottom-6 z-20">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSend();
-              }}
-              className="bg-[#ffffff] rounded-2xl shadow-lg border border-[#eaedff] p-2 flex items-center gap-2"
-            >
-              <input
-                type="text"
-                value={inputVal}
-                onChange={(e) => setInputVal(e.target.value)}
-                placeholder="Ask AI Assistant about team progress, code, or documentation..."
-                className="flex-1 bg-transparent px-3 py-1.5 text-xs text-[#131b2e] placeholder:text-[#6e7b6c] focus:outline-none"
-              />
-              <button
-                type="submit"
-                className="p-2 rounded-xl bg-[#006b2c] hover:bg-[#00873a] text-white flex items-center justify-center shadow-xs cursor-pointer active:scale-95 transition-all"
-              >
-                <span className="material-symbols-outlined text-[18px]">arrow_upward</span>
-              </button>
-            </form>
-          </div>
-        </section>
+      {/* Pinned Floating Prompt Input Centerpiece */}
+      <div
+        className={`fixed bottom-0 ${
+          isCollapsed ? 'left-0 lg:left-18' : 'left-0 lg:left-64'
+        } right-0 z-30 p-3 md:p-4 flex flex-col items-center pointer-events-none transition-all duration-300`}
+      >
+        <ChatInput
+          value={inputVal}
+          onChange={setInputVal}
+          onSend={handleSend}
+          isLoading={isThinking}
+          onOpenDocPreview={() => setShowDocPreview(true)}
+        />
       </div>
 
-      {/* Stitch Slide-out AI Documentation Preview Panel with Backdrop */}
+      {/* Slide-out AI Documentation Preview Panel with Backdrop */}
       {showDocPreview && (
         <>
           <div
             id="backdrop"
-            className="fixed inset-0 top-16 left-0 lg:left-[260px] bg-[#131b2e]/25 backdrop-blur-[2px] z-40 transition-opacity animate-in fade-in cursor-pointer"
+            className={`fixed inset-0 top-16 left-0 ${
+              isCollapsed ? 'lg:left-18' : 'lg:left-64'
+            } bg-[#131b2e]/25 backdrop-blur-[2px] z-40 transition-all duration-300 ease-in-out animate-in fade-in cursor-pointer`}
             onClick={() => setShowDocPreview(false)}
           />
           <div

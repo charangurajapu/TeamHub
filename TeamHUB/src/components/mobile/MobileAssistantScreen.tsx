@@ -4,7 +4,7 @@ export const MobileAssistantScreen: React.FC = () => {
   const [messages, setMessages] = useState<Array<{ sender: 'user' | 'ai'; text: string; time: string }>>([
     {
       sender: 'ai',
-      text: 'Good morning! I am your TeamHub AI copilot. I can summarize thread decisions, draft your daily standup, or pull architecture specs from GitHub.',
+      text: 'Good morning! I am your TeamHub AI assistant. I can summarize thread decisions, draft your daily standup, or pull architecture specs from GitHub.',
       time: '10:00 AM',
     },
     {

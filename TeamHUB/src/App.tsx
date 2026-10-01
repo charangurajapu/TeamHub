@@ -1,21 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { ViewMode, DeviceMode, User, Task, ChannelMessage, Question, StandupEntry } from './types';
+import { ViewMode, User, Task, ChannelMessage, Question, StandupEntry } from './types';
 import { USERS, INITIAL_TASKS, INITIAL_CHANNEL_MESSAGES, INITIAL_QUESTIONS, STANDUP_ENTRIES } from './data/mockData';
 import { getActiveAuthSession, signOutFromSupabaseAuth, AUTH_SESSION_STORAGE_KEY } from './lib/supabase';
+import { useTheme, THEME_STORAGE_KEY } from './context/ThemeContext';
+import { useSidebar } from './context/SidebarContext';
 import { Header } from './components/common/Header';
 import { Sidebar } from './components/common/Sidebar';
 import { AiDrawer } from './components/common/AiDrawer';
 import { PhotoCropModal } from './components/common/PhotoCropModal';
 import { CommandPaletteModal } from './components/common/CommandPaletteModal';
-
-// Mobile Screens
-import { MobileFrame } from './components/mobile/MobileFrame';
-import { MobileTabBar } from './components/mobile/MobileTabBar';
-import { MobileHomeScreen } from './components/mobile/MobileHomeScreen';
-import { MobileChannelsScreen } from './components/mobile/MobileChannelsScreen';
-import { MobileTasksScreen } from './components/mobile/MobileTasksScreen';
-import { MobileQuestionsScreen } from './components/mobile/MobileQuestionsScreen';
-import { MobileAssistantScreen } from './components/mobile/MobileAssistantScreen';
+import { DatabaseFallbackToast } from './components/common/DatabaseFallbackToast';
 
 // Desktop Screens
 import { HomeDashboard } from './components/desktop/HomeDashboard';
@@ -30,11 +24,12 @@ import { ProfileSettingsView } from './components/desktop/ProfileSettingsView';
 import { WaitingApprovalView } from './components/desktop/WaitingApprovalView';
 import { AuthView } from './components/desktop/AuthView';
 import { ReviewsView } from './components/desktop/ReviewsView';
+import { TeamView } from './components/desktop/TeamView';
 
 export default function App() {
-  const [deviceMode, setDeviceMode] = useState<DeviceMode>('desktop');
+  const { setTheme: setAppTheme } = useTheme();
+  const { isCollapsed } = useSidebar();
   const [viewMode, setViewMode] = useState<ViewMode>('home');
-  const [mobileTab, setMobileTab] = useState<'home' | 'tasks' | 'channels' | 'questions' | 'ai-assistant'>('home');
 
   // Supabase Auth states: starts with no active user until verified
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -52,10 +47,16 @@ export default function App() {
 
   // Global Modals / Drawers
   const [showAiDrawer, setShowAiDrawer] = useState(false);
+  const [aiDrawerPrompt, setAiDrawerPrompt] = useState<string | undefined>(undefined);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showPhotoCropModal, setShowPhotoCropModal] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(undefined);
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | undefined>(undefined);
+
+  const handleOpenAiDrawer = (prompt?: string) => {
+    setAiDrawerPrompt(prompt);
+    setShowAiDrawer(true);
+  };
 
   // 1. On app load: Check for active Supabase Auth session
   useEffect(() => {
@@ -69,6 +70,10 @@ export default function App() {
         if (user) {
           setCurrentUser(user);
           setIsAuthenticated(true);
+          // Restore user's saved theme preference if not overridden by local storage
+          if (user.theme && !localStorage.getItem(THEME_STORAGE_KEY)) {
+            setAppTheme(user.theme);
+          }
           // Route to role-specific dashboard fetched from database
           if (user.role === 'admin') {
             setViewMode('admin-center');
@@ -112,9 +117,11 @@ export default function App() {
   };
 
   /**
-   * Developer Persona switcher (only available when Dev Mode is explicitly toggled ON)
+   * Developer Persona switcher (only available when VITE_DEV_MODE=true is set in env)
    */
   const handleSelectUser = (key: string) => {
+    if (import.meta.env.VITE_DEV_MODE !== 'true') return;
+
     const selected = key === 'admin'
       ? { ...usersState.sarah, role: 'admin' as const, roleTitle: 'Workspace Administrator' }
       : usersState[key] || usersState.sarah;
@@ -169,6 +176,10 @@ export default function App() {
     };
 
     setCurrentUser(newUser);
+
+    if (updated.theme) {
+      setAppTheme(updated.theme);
+    }
 
     // Save updated session to local cache
     try {
@@ -232,7 +243,18 @@ export default function App() {
     );
   };
 
+  // Route protection guard: Team directory is strictly blocked for Team Members
+  useEffect(() => {
+    if (viewMode === 'team' && currentUser && currentUser.role !== 'admin' && currentUser.role !== 'lead') {
+      setViewMode('home');
+    }
+  }, [viewMode, currentUser]);
+
   const handleNavigate = (view: ViewMode, itemId?: string) => {
+    if (view === 'team' && currentUser?.role !== 'admin' && currentUser?.role !== 'lead') {
+      setViewMode('home');
+      return;
+    }
     setViewMode(view);
     if (view === 'tasks' && itemId) setSelectedTaskId(itemId);
     if (view === 'questions' && itemId) setSelectedQuestionId(itemId);
@@ -243,11 +265,11 @@ export default function App() {
   // ============================================================
   if (isCheckingAuth) {
     return (
-      <div className="min-h-screen bg-[#faf8ff] flex flex-col items-center justify-center p-4">
-        <div className="w-12 h-12 rounded-2xl bg-[#006b2c] text-white flex items-center justify-center font-bold text-lg shadow-md animate-pulse">
+      <div className="min-h-screen bg-[var(--surface)] text-[var(--on-surface)] flex flex-col items-center justify-center p-4">
+        <div className="w-12 h-12 rounded-2xl bg-[#006b2c] dark:bg-[#22c55e] text-white dark:text-[#003915] flex items-center justify-center font-bold text-lg shadow-md animate-pulse">
           TH
         </div>
-        <p className="mt-4 text-xs font-semibold text-[#3e4a3d] animate-pulse">
+        <p className="mt-4 text-xs font-semibold text-[#3e4a3d] dark:text-[#bcc7de] animate-pulse">
           Connecting to Supabase Auth...
         </p>
       </div>
@@ -294,94 +316,7 @@ export default function App() {
     );
   }
 
-  // ============================================================
-  // RENDER REACT NATIVE MOBILE PROTOTYPE MODE (AUTHENTICATED)
-  // ============================================================
-  if (deviceMode === 'mobile-framed' || deviceMode === 'mobile-full') {
-    const mobileContent = (
-      <div className="relative w-full min-h-screen bg-[#faf8ff] text-[#131b2e]">
-        {mobileTab === 'home' && (
-          <MobileHomeScreen
-            currentUser={currentUser}
-            onOpenAssistant={() => setMobileTab('ai-assistant')}
-            onNavigateToTasks={() => setMobileTab('tasks')}
-            onNavigateToChannel={() => setMobileTab('channels')}
-            onNavigateToQuestions={() => setMobileTab('questions')}
-            onLogout={handleLogout}
-          />
-        )}
 
-        {mobileTab === 'channels' && (
-          <MobileChannelsScreen
-            currentUser={currentUser}
-            onOpenThread={() => {
-              setDeviceMode('desktop');
-              setViewMode('channels');
-            }}
-            onOpenSpecPreview={() => {
-              setDeviceMode('desktop');
-              setViewMode('files');
-            }}
-          />
-        )}
-
-        {mobileTab === 'tasks' && (
-          <MobileTasksScreen
-            onSelectTask={(task: Task) => {
-              setSelectedTaskId(task.id);
-              setDeviceMode('desktop');
-              setViewMode('tasks');
-            }}
-            onNewTask={() => {
-              setDeviceMode('desktop');
-              setViewMode('tasks');
-            }}
-          />
-        )}
-
-        {mobileTab === 'questions' && (
-          <MobileQuestionsScreen
-            onSelectQuestion={(q) => {
-              setSelectedQuestionId(q.id);
-              setDeviceMode('desktop');
-              setViewMode('questions');
-            }}
-            onAskQuestion={() => {
-              setDeviceMode('desktop');
-              setViewMode('questions');
-            }}
-          />
-        )}
-
-        {mobileTab === 'ai-assistant' && <MobileAssistantScreen />}
-
-        {/* Persistent Bottom Tab Bar */}
-        <MobileTabBar currentTab={mobileTab} onSelectTab={setMobileTab} />
-      </div>
-    );
-
-    if (deviceMode === 'mobile-framed') {
-      return (
-        <MobileFrame onExitMobile={() => setDeviceMode('desktop')}>
-          {mobileContent}
-        </MobileFrame>
-      );
-    }
-
-    return (
-      <div className="w-full min-h-screen bg-[#faf8ff]">
-        <div className="fixed top-2 right-2 z-50">
-          <button
-            onClick={() => setDeviceMode('desktop')}
-            className="px-3 py-1.5 rounded-full bg-[#006b2c] text-white text-xs font-semibold shadow-lg cursor-pointer"
-          >
-            Desktop Mode
-          </button>
-        </div>
-        {mobileContent}
-      </div>
-    );
-  }
 
   // ============================================================
   // RENDER FULL DESKTOP WORKSPACE VIEW (AUTHENTICATED)
@@ -391,7 +326,7 @@ export default function App() {
       {/* Fixed Left Sidebar */}
       <Sidebar
         currentView={viewMode}
-        onSelectView={setViewMode}
+        onSelectView={handleNavigate}
         currentUser={currentUser}
       />
 
@@ -402,15 +337,17 @@ export default function App() {
         onLogout={handleLogout}
         onSelectUser={handleSelectUser}
         users={usersState}
-        deviceMode={deviceMode}
-        onSelectDeviceMode={setDeviceMode}
         onOpenAiDrawer={() => setShowAiDrawer(true)}
         onOpenCommandPalette={() => setShowCommandPalette(true)}
         onQuickNewTask={() => setViewMode('tasks')}
       />
 
       {/* Main Content Stage */}
-      <div className="lg:pl-[260px] pt-16 flex-1 flex flex-col">
+      <div
+        className={`pt-16 flex-1 flex flex-col transition-[padding] duration-300 ease-in-out ${
+          isCollapsed ? 'lg:pl-[72px]' : 'lg:pl-[260px]'
+        }`}
+      >
         <main className="flex-1 p-6 md:p-8 max-w-7xl w-full mx-auto">
           {viewMode === 'home' && (
             <HomeDashboard
@@ -441,7 +378,7 @@ export default function App() {
           {viewMode === 'questions' && (
             <QuestionsView
               currentUser={currentUser}
-              onOpenAiDrawer={() => setShowAiDrawer(true)}
+              onOpenAiDrawer={handleOpenAiDrawer}
               selectedQuestionId={selectedQuestionId}
             />
           )}
@@ -469,15 +406,35 @@ export default function App() {
           )}
 
           {viewMode === 'admin-center' && (
-            <HomeDashboard
-              currentUser={{ ...currentUser, role: 'admin' }}
-              onNavigate={handleNavigate}
-              onOpenAiDrawer={() => setShowAiDrawer(true)}
-              onQuickNewTask={() => setViewMode('tasks')}
-            />
+            currentUser.role === 'admin' ? (
+              <HomeDashboard
+                currentUser={currentUser}
+                onNavigate={handleNavigate}
+                onOpenAiDrawer={handleOpenAiDrawer}
+                onQuickNewTask={() => setViewMode('tasks')}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center p-12 bg-[#ffffff] rounded-2xl border border-[#eaedff] text-center max-w-md mx-auto my-8">
+                <span className="material-symbols-outlined text-[32px] text-[#ba1a1a] mb-2">shield_person</span>
+                <p className="text-xs text-[#ba1a1a] font-semibold">
+                  Access Denied: Admin Center is restricted to Administrators.
+                </p>
+              </div>
+            )
           )}
 
-          {viewMode === 'manage-users' && <AdminUsersView currentUser={currentUser} />}
+          {viewMode === 'manage-users' && (
+            currentUser.role === 'admin' ? (
+              <AdminUsersView currentUser={currentUser} />
+            ) : (
+              <div className="flex flex-col items-center justify-center p-12 bg-[#ffffff] rounded-2xl border border-[#eaedff] text-center max-w-md mx-auto my-8">
+                <span className="material-symbols-outlined text-[32px] text-[#ba1a1a] mb-2">shield_person</span>
+                <p className="text-xs text-[#ba1a1a] font-semibold">
+                  Access Denied: User Management is restricted to Administrators.
+                </p>
+              </div>
+            )
+          )}
 
           {viewMode === 'profile-settings' && (
             <ProfileSettingsView
@@ -499,17 +456,37 @@ export default function App() {
               }}
             />
           )}
+
+          {viewMode === 'team' && (
+            currentUser.role === 'admin' || currentUser.role === 'lead' ? (
+              <TeamView
+                currentUser={currentUser}
+                onNavigate={handleNavigate}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center p-12 bg-[#ffffff] rounded-2xl border border-[#eaedff] text-center max-w-md mx-auto my-8">
+                <span className="material-symbols-outlined text-[32px] text-[#ba1a1a] mb-2">shield_person</span>
+                <p className="text-xs text-[#ba1a1a] font-semibold">
+                  Access Denied: Team Directory is restricted to Team Leads and Administrators.
+                </p>
+              </div>
+            )
+          )}
         </main>
       </div>
 
       {/* Global Slide-out AI Assistant Drawer (Accessible anywhere) */}
       <AiDrawer
         isOpen={showAiDrawer}
-        onClose={() => setShowAiDrawer(false)}
+        onClose={() => {
+          setShowAiDrawer(false);
+          setAiDrawerPrompt(undefined);
+        }}
         currentUser={currentUser || undefined}
         onNavigate={handleNavigate}
         onInsertToTask={() => setViewMode('tasks')}
         onPostToStandup={() => setViewMode('my-work')}
+        initialPrompt={aiDrawerPrompt}
       />
 
       {/* Profile Photo Crop & Adjust Modal (4-step flow) */}
@@ -527,6 +504,9 @@ export default function App() {
         onClose={() => setShowCommandPalette(false)}
         onNavigate={handleNavigate}
       />
+
+      {/* Global Database Fallback Alert Toast */}
+      <DatabaseFallbackToast />
     </div>
   );
 }

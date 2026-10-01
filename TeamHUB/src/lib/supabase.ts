@@ -1,10 +1,11 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { User, Role, Task, TaskStatus, Channel, ChannelMessage, Question, QuestionAnswer, WorkspaceFile, JoinRequest, Review, ReviewStatus, Project, ProjectStatus, StandupEntry } from '../types';
-import { INITIAL_REVIEWS, INITIAL_PROJECTS, CHANNELS, WORKSPACE_FILES, STANDUP_ENTRIES, INITIAL_TASKS, INITIAL_CHANNEL_MESSAGES, INITIAL_QUESTIONS } from '../data/mockData';
+import { INITIAL_REVIEWS, INITIAL_PROJECTS, CHANNELS, WORKSPACE_FILES, STANDUP_ENTRIES, INITIAL_TASKS, INITIAL_CHANNEL_MESSAGES, INITIAL_QUESTIONS, USERS } from '../data/mockData';
 
 // Environment variables for Supabase (configured via .env)
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const envObj = (typeof import.meta !== 'undefined' && (import.meta as any).env) || (typeof process !== 'undefined' ? process.env : {}) || {};
+const supabaseUrl = (envObj.VITE_SUPABASE_URL as string) || '';
+const supabaseAnonKey = (envObj.VITE_SUPABASE_ANON_KEY as string) || '';
 
 export const isSupabaseConfigured = Boolean(
   supabaseUrl && 
@@ -39,6 +40,40 @@ export const DEFAULT_WORKSPACE = {
   is_active: true,
   created_at: '2024-01-01T00:00:00.000Z',
 };
+
+export interface DatabaseFallbackDetail {
+  operation: string;
+  error: string;
+  message: string;
+  timestamp: number;
+}
+
+/**
+ * Dispatches a visible global notification whenever a Supabase operation encounters
+ * a server/database failure and falls back to local storage/mock state.
+ */
+export function notifyDatabaseFallback(operation: string, error: string | Error | any) {
+  if (!isSupabaseConfigured) {
+    // Intentionally offline / unconfigured demo mode, skip fallback error toast
+    return;
+  }
+  const errText = typeof error === 'string' ? error : error?.message || 'Database operation failed';
+  const displayMsg = `Server sync failed during "${operation}": ${errText}. Changes were saved to local storage on this device only.`;
+  console.error(`[Database Fallback Alert] ${operation}:`, errText);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('teamhub:database-fallback', {
+        detail: {
+          operation,
+          error: errText,
+          message: displayMsg,
+          timestamp: Date.now(),
+        },
+      })
+    );
+  }
+}
 
 /**
  * Generates a unique pod code in the format: TH-####-XXX
@@ -190,9 +225,12 @@ export async function createWorkspaceRecord(workspace: {
 
       if (data && !error) {
         record.id = data.id;
+      } else if (error) {
+        notifyDatabaseFallback('Create Workspace', error);
       }
     } catch (err) {
       console.warn('Could not insert workspace in Supabase:', err);
+      notifyDatabaseFallback('Create Workspace', err);
     }
   }
 
@@ -268,15 +306,20 @@ export async function regenerateWorkspacePodCode(
   // 1. Supabase update
   if (supabase) {
     try {
-      await supabase
+      const { error } = await supabase
         .from('workspaces')
         .update({
           pod_code: newCode,
           updated_at: new Date().toISOString(),
         })
         .or(`id.eq.${wsId},slug.eq.${wsId}`);
+
+      if (error) {
+        notifyDatabaseFallback('Regenerate Pod Code', error);
+      }
     } catch (err) {
       console.warn('Supabase pod_code update notice:', err);
+      notifyDatabaseFallback('Regenerate Pod Code', err);
     }
   }
 
@@ -442,6 +485,159 @@ export async function fetchUserProfileFromDb(userId: string, emailFallback?: str
   }
 
   return null;
+}
+
+/**
+ * Normalizes pod name to a canonical slug for grouping & RLS matching.
+ */
+export function normalizePodId(podName?: string): string {
+  if (!podName) return 'core';
+  const lower = podName.toLowerCase();
+  if (lower.includes('core') || lower.includes('eng')) return 'core';
+  if (lower.includes('design') || lower.includes('experience')) return 'design';
+  if (lower.includes('mobile')) return 'mobile';
+  if (lower.includes('infra') || lower.includes('system') || lower.includes('data')) return 'infra';
+  return 'core';
+}
+
+/**
+ * Fetches team members from Supabase profiles table, strictly enforcing RLS scoping:
+ * - Administrators can view all team members across all pods.
+ * - Team Leads can only query users belonging to their own pod.
+ * - Team Members are forbidden and receive an access denied error.
+ */
+export async function fetchTeamMembersFromDb(currentUser: User): Promise<{ success: boolean; users: User[]; error?: string }> {
+  // 1. Role-based client gate
+  if (currentUser.role !== 'admin' && currentUser.role !== 'lead') {
+    return {
+      success: false,
+      users: [],
+      error: 'Access Denied: Team Directory is restricted to Team Leads and Administrators.',
+    };
+  }
+
+  // 2. Query live Supabase database if configured
+  if (supabase) {
+    try {
+      // Attempt to invoke the secure get_team_directory RPC if defined
+      const { data: rpcData, error: rpcError } = await supabase.rpc('get_team_directory');
+      if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
+        const mappedUsers: User[] = rpcData.map((data: any) => {
+          const name = data.full_name || data.name || data.email?.split('@')[0] || 'Team User';
+          const initials = name
+            .split(' ')
+            .map((n: string) => n[0])
+            .join('')
+            .toUpperCase()
+            .slice(0, 2);
+          return {
+            id: data.id,
+            name,
+            email: data.email || '',
+            role: (data.role as Role) || 'member',
+            roleTitle: data.role_title || (data.role === 'admin' ? 'Workspace Administrator' : data.role === 'lead' ? 'Team Lead' : 'Team Member'),
+            department: data.department || 'Engineering',
+            pod: data.pod || 'Core Engineering Pod',
+            avatarUrl: data.avatar_url || undefined,
+            initials: initials || 'TU',
+            initialsColor: data.initials_color || '#006b2c',
+            status: data.status || 'online',
+            statusText: data.status_text || 'Available',
+            location: data.location || 'San Francisco, CA',
+            timezone: data.timezone || 'UTC-7 (PDT)',
+            phone: data.phone || '',
+            dateOfBirth: data.date_of_birth || '',
+            dateJoined: data.date_joined || 'Recently joined',
+            reportingLead: data.reporting_lead || 'David Kim',
+            bio: data.bio || '',
+            skills: Array.isArray(data.skills) ? data.skills : ['Engineering'],
+            socialLinks: data.social_links || {},
+            notificationPreferences: data.notification_preferences || { directMentions: true, taskStatusChanges: true, qnaReplies: false },
+            theme: data.theme || 'light',
+            tasksCompleted: data.tasks_completed || 0,
+            questionsAnswered: data.questions_answered || 0,
+            lastActive: 'Just now',
+            workspaceId: data.workspace_id || undefined,
+            podCode: data.pod_code || undefined,
+          };
+        });
+        return { success: true, users: mappedUsers };
+      }
+
+      // Direct RLS query on public.profiles
+      let query = supabase.from('profiles').select('*');
+      if (currentUser.role === 'lead') {
+        const targetPod = currentUser.pod || 'Core Engineering Pod';
+        query = query.or(`pod.eq.${targetPod},pod_code.eq.${currentUser.podCode || 'core'}`);
+      }
+
+      const { data, error } = await query;
+      if (!error && Array.isArray(data)) {
+        if (data.length === 0) {
+          return { success: true, users: [] };
+        }
+        const mappedUsers: User[] = data.map((d: any) => {
+          const name = d.full_name || d.name || d.email?.split('@')[0] || 'Team User';
+          const initials = name
+            .split(' ')
+            .map((n: string) => n[0])
+            .join('')
+            .toUpperCase()
+            .slice(0, 2);
+          return {
+            id: d.id,
+            name,
+            email: d.email || '',
+            role: (d.role as Role) || 'member',
+            roleTitle: d.role_title || (d.role === 'admin' ? 'Workspace Administrator' : d.role === 'lead' ? 'Team Lead' : 'Team Member'),
+            department: d.department || 'Engineering',
+            pod: d.pod || 'Core Engineering Pod',
+            avatarUrl: d.avatar_url || undefined,
+            initials: initials || 'TU',
+            initialsColor: d.initials_color || '#006b2c',
+            status: d.status || 'online',
+            statusText: d.status_text || 'Available',
+            location: d.location || 'San Francisco, CA',
+            timezone: d.timezone || 'UTC-7 (PDT)',
+            phone: d.phone || '',
+            dateOfBirth: d.date_of_birth || '',
+            dateJoined: d.date_joined || 'Recently joined',
+            reportingLead: d.reporting_lead || 'David Kim',
+            bio: d.bio || '',
+            skills: Array.isArray(d.skills) ? d.skills : ['Engineering'],
+            socialLinks: d.social_links || {},
+            notificationPreferences: d.notification_preferences || { directMentions: true, taskStatusChanges: true, qnaReplies: false },
+            theme: d.theme || 'light',
+            tasksCompleted: d.tasks_completed || 0,
+            questionsAnswered: d.questions_answered || 0,
+            lastActive: 'Just now',
+            workspaceId: d.workspace_id || undefined,
+            podCode: d.pod_code || undefined,
+          };
+        });
+        return { success: true, users: mappedUsers };
+      }
+    } catch (err: any) {
+      console.warn('Supabase profiles query error in fetchTeamMembersFromDb:', err);
+    }
+  }
+
+  // 3. Fallback to mock data with identical RLS scoping
+  const allUsers = Object.values(USERS).filter((u) => u.id !== 'user-ai');
+
+  if (currentUser.role === 'admin') {
+    // Admin sees all team leads and team members across all pods
+    return { success: true, users: allUsers };
+  }
+
+  if (currentUser.role === 'lead') {
+    // Team Lead sees only members belonging to their own pod
+    const userPodKey = normalizePodId(currentUser.pod);
+    const podMembers = allUsers.filter((u) => normalizePodId(u.pod) === userPodKey);
+    return { success: true, users: podMembers };
+  }
+
+  return { success: false, users: [], error: 'Access Denied: Restricted.' };
 }
 
 /**
@@ -839,6 +1035,7 @@ export async function uploadAvatarToSupabase(
       return { url: publicUrlData.publicUrl };
     } catch (err: any) {
       console.warn('Supabase storage call failed:', err);
+      notifyDatabaseFallback('Upload Avatar', err);
     }
   }
 
@@ -885,10 +1082,14 @@ export async function deleteAvatarFromSupabase(
 
       if (listData && listData.length > 0) {
         const paths = listData.map((f) => `${targetUserId}/${f.name}`);
-        await supabase.storage.from('avatars').remove(paths);
+        const { error: removeError } = await supabase.storage.from('avatars').remove(paths);
+        if (removeError) {
+          notifyDatabaseFallback('Delete Avatar', removeError);
+        }
       }
     } catch (err) {
       console.warn('Supabase storage delete failed:', err);
+      notifyDatabaseFallback('Delete Avatar', err);
     }
   }
 
@@ -960,6 +1161,7 @@ export async function updateUserProfileRecord(
       }
     } catch (err: any) {
       console.warn('Supabase DB call failed:', err);
+      notifyDatabaseFallback('Update User Profile', err);
     }
   }
 
@@ -983,6 +1185,7 @@ export async function fetchTasksFromDb(): Promise<Task[] | null> {
 
     return data.map((t: any): Task => ({
       id: t.id,
+      projectId: t.project_id || undefined,
       key: t.key,
       title: t.title,
       description: t.description || '',
@@ -1015,7 +1218,147 @@ export async function fetchTasksFromDb(): Promise<Task[] | null> {
   }
 }
 
+/**
+ * Scopes eligible task assignees based on user role and project:
+ * - Team Lead: ONLY members of the Lead's own pod/team (same pod_id/pod as the Lead), not the entire workspace.
+ * - Administrator: ONLY members belonging to the specific project (scoped by projectId). If no project is selected, fall back to all workspace members.
+ * - Team Member: Only members of their own pod / project (or self).
+ */
+export function getEligibleTaskAssignees(
+  actingUser: User,
+  projectId?: string | null,
+  allUsers: Record<string, User> | User[] = USERS,
+  allProjects: Project[] = getLocalProjects()
+): User[] {
+  const usersList: User[] = Array.isArray(allUsers)
+    ? allUsers
+    : Object.values(allUsers);
+
+  // 1. Team Lead: Scoped strictly to Lead's own pod/team
+  if (actingUser.role === 'lead') {
+    const leadPod = (actingUser.pod || '').toLowerCase().trim();
+    const leadPodId = (actingUser.podId || '').toLowerCase().trim();
+
+    return usersList.filter((u) => {
+      if (u.id === actingUser.id) return true;
+      const userPod = (u.pod || '').toLowerCase().trim();
+      const userPodId = (u.podId || '').toLowerCase().trim();
+
+      // Check podId equality if present
+      if (leadPodId && userPodId && leadPodId === userPodId) {
+        return true;
+      }
+
+      // Check pod text matching common roots
+      if (leadPod && userPod) {
+        if (leadPod === userPod) return true;
+        const isCoreLead = leadPod.includes('core');
+        const isCoreUser = userPod.includes('core');
+        if (isCoreLead && isCoreUser) return true;
+
+        const isMobileLead = leadPod.includes('mobile');
+        const isMobileUser = userPod.includes('mobile');
+        if (isMobileLead && isMobileUser) return true;
+
+        const isDesignLead = leadPod.includes('design');
+        const isDesignUser = userPod.includes('design');
+        if (isDesignLead && isDesignUser) return true;
+
+        const isInfraLead = leadPod.includes('infra');
+        const isInfraUser = userPod.includes('infra');
+        if (isInfraLead && isInfraUser) return true;
+      }
+      return false;
+    });
+  }
+
+  // 2. Administrator: Scoped by the task's project_id
+  if (actingUser.role === 'admin') {
+    if (projectId) {
+      const proj = allProjects.find((p) => p.id === projectId);
+      if (proj) {
+        // If project defines explicit members
+        if (Array.isArray(proj.members) && proj.members.length > 0) {
+          const memberIdSet = new Set(proj.members.map((m) => m.id));
+          const memberEmailSet = new Set(proj.members.map((m) => (m.email || '').toLowerCase()));
+          return usersList.filter((u) => memberIdSet.has(u.id) || (u.email && memberEmailSet.has(u.email.toLowerCase())));
+        }
+
+        // Fallback: project's pod members
+        const projPod = (proj.pod || '').toLowerCase();
+        const projPodId = (proj.podId || '').toLowerCase();
+        return usersList.filter((u) => {
+          const userPod = (u.pod || '').toLowerCase();
+          const userPodId = (u.podId || '').toLowerCase();
+          return (
+            (projPodId && userPodId === projPodId) ||
+            (projPod && userPod && (projPod.includes(userPod) || userPod.includes(projPod)))
+          );
+        });
+      }
+    }
+
+    // If task isn't associated with a project yet, fall back to showing all workspace members
+    return usersList;
+  }
+
+  // 3. Team Member: Only members of their own pod / project (or self)
+  const memberPod = (actingUser.pod || '').toLowerCase();
+  return usersList.filter((u) => {
+    if (u.id === actingUser.id) return true;
+    const userPod = (u.pod || '').toLowerCase();
+    return memberPod && userPod && (memberPod.includes(userPod) || userPod.includes(memberPod));
+  });
+}
+
+/**
+ * Validates task assignment permissions based on role, pod, and project scope.
+ */
+export function validateTaskAssignment(
+  task: { assignee?: User | { id: string }; projectId?: string | null },
+  actingUser: User,
+  allUsers: Record<string, User> | User[] = USERS,
+  allProjects: Project[] = getLocalProjects()
+): { valid: boolean; error?: string } {
+  // If unassigned or self-assigned, always valid
+  if (!task.assignee || task.assignee.id === 'unassigned' || task.assignee.id === actingUser.id) {
+    return { valid: true };
+  }
+
+  const assigneeId = task.assignee.id;
+  const eligible = getEligibleTaskAssignees(actingUser, task.projectId, allUsers, allProjects);
+  const isEligible = eligible.some((u) => u.id === assigneeId);
+
+  if (!isEligible) {
+    if (actingUser.role === 'lead') {
+      return {
+        valid: false,
+        error: `Permission denied: Team Leads can only assign tasks to members of their own pod (${actingUser.pod || 'their pod'}).`,
+      };
+    }
+    if (actingUser.role === 'admin' && task.projectId) {
+      const proj = allProjects.find((p) => p.id === task.projectId);
+      return {
+        valid: false,
+        error: `Permission denied: Administrators can only assign tasks to members belonging to project "${proj?.name || task.projectId}".`,
+      };
+    }
+    return {
+      valid: false,
+      error: 'Permission denied: Assigned user is outside the permitted scope for this task.',
+    };
+  }
+
+  return { valid: true };
+}
+
 export async function createTaskInDb(task: Task, actingUser: User): Promise<{ success: boolean; task?: Task; error?: string }> {
+  // Server-side validation of assignment scope
+  const validation = validateTaskAssignment(task, actingUser);
+  if (!validation.valid) {
+    return { success: false, error: validation.error };
+  }
+
   if (supabase) {
     try {
       const { data, error } = await supabase
@@ -1029,6 +1372,7 @@ export async function createTaskInDb(task: Task, actingUser: User): Promise<{ su
           channel: task.channel,
           sprint: task.sprint,
           assignee_id: task.assignee.id !== 'unassigned' ? task.assignee.id : actingUser.id,
+          project_id: task.projectId || null,
           created_by: actingUser.id,
           due_date: task.dueDate,
           due_time: task.dueTime || null,
@@ -1053,6 +1397,12 @@ export async function createTaskInDb(task: Task, actingUser: User): Promise<{ su
 }
 
 export async function updateTaskInDb(task: Task, actingUser: User): Promise<{ success: boolean; error?: string }> {
+  // Server-side validation of assignment scope
+  const validation = validateTaskAssignment(task, actingUser);
+  if (!validation.valid) {
+    return { success: false, error: validation.error };
+  }
+
   if (supabase) {
     try {
       const { error } = await supabase
@@ -1062,6 +1412,8 @@ export async function updateTaskInDb(task: Task, actingUser: User): Promise<{ su
           description: task.description,
           status: task.status,
           priority: task.priority,
+          assignee_id: task.assignee.id !== 'unassigned' ? task.assignee.id : null,
+          project_id: task.projectId || null,
           subtasks: task.subtasks,
           comments: task.comments,
           updated_at: new Date().toISOString(),
@@ -1102,19 +1454,105 @@ export async function deleteTaskInDb(taskId: string, actingUser: User): Promise<
 // CHANNEL MESSAGES SUPABASE DB CRUD OPERATIONS
 // =========================================================================
 
-export async function fetchMessagesFromDb(channelId: string): Promise<ChannelMessage[] | null> {
-  if (!supabase) return null;
+export const CHANNEL_MESSAGES_STORAGE_KEY = 'teamhub_messages_by_channel';
+
+/**
+ * Retrieves all channel messages organized by channelId from localStorage
+ */
+export function getLocalMessagesByChannel(): Record<string, ChannelMessage[]> {
   try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(CHANNEL_MESSAGES_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to parse local messages by channel:', err);
+  }
+
+  // Initialize isolated seeds by channel
+  const initialMap: Record<string, ChannelMessage[]> = {
+    general: INITIAL_CHANNEL_MESSAGES.filter((m) => (m.channelId || m.channel_id) === 'general'),
+    design: INITIAL_CHANNEL_MESSAGES.filter((m) => (m.channelId || m.channel_id) === 'design'),
+  };
+  return initialMap;
+}
+
+/**
+ * Saves a single message to the isolated channel message list in localStorage
+ */
+export function saveLocalMessageForChannel(channelId: string, message: ChannelMessage): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const all = getLocalMessagesByChannel();
+      const existing = all[channelId] || [];
+      const index = existing.findIndex((m) => m.id === message.id);
+      if (index >= 0) {
+        existing[index] = { ...message, channelId, channel_id: channelId };
+        all[channelId] = [...existing];
+      } else {
+        all[channelId] = [...existing, { ...message, channelId, channel_id: channelId }];
+      }
+      localStorage.setItem(CHANNEL_MESSAGES_STORAGE_KEY, JSON.stringify(all));
+    }
+  } catch (err) {
+    console.warn('Failed to save local message for channel:', err);
+  }
+}
+
+export async function fetchMessagesFromDb(channelId: string): Promise<ChannelMessage[] | null> {
+  const localMap = getLocalMessagesByChannel();
+  const localMessages = localMap[channelId] || (channelId === 'general' ? localMap['general'] : []) || [];
+
+  if (!supabase) return localMessages;
+  try {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(channelId);
+    let targetChannelUuid = channelId;
+
+    if (!isUuid) {
+      // Resolve text slug (e.g. 'general') to UUID from local cache or DB
+      const localChannels = getLocalChannels();
+      const match = localChannels.find(
+        (c) => c.slug === channelId || c.name === channelId || c.id === channelId
+      );
+      if (match && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(match.id)) {
+        targetChannelUuid = match.id;
+      } else {
+        const { data: dbChan } = await supabase
+          .from('channels')
+          .select('id')
+          .or(`slug.eq.${channelId},name.eq.${channelId}`)
+          .limit(1)
+          .maybeSingle();
+        if (dbChan?.id) {
+          targetChannelUuid = dbChan.id;
+        }
+      }
+    }
+
+    // Only query DB if we have a valid UUID for the foreign key column
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetChannelUuid)) {
+      return localMessages;
+    }
+
     const { data, error } = await supabase
       .from('channel_messages')
       .select('*, author:profiles!author_id(*)')
-      .eq('channel_id', channelId)
+      .eq('channel_id', targetChannelUuid)
       .order('created_at', { ascending: true });
 
-    if (error || !data) return null;
+    if (error || !data || data.length === 0) {
+      return localMessages;
+    }
 
-    return data.map((m: any): ChannelMessage => ({
+    const dbMapped: ChannelMessage[] = data.map((m: any): ChannelMessage => ({
       id: m.id,
+      channelId: m.channel_id,
+      channel_id: m.channel_id,
       author: (m.author
         ? {
             id: m.author.id,
@@ -1133,53 +1571,127 @@ export async function fetchMessagesFromDb(channelId: string): Promise<ChannelMes
       reactions: Array.isArray(m.reactions) ? m.reactions : [],
       threadRepliesCount: m.thread_replies_count || 0,
     }));
+
+    // Merge any local messages that were sent locally (deduplicated by id)
+    const existingIds = new Set(dbMapped.map((m) => m.id));
+    const merged = [...dbMapped];
+    for (const lm of localMessages) {
+      if (!existingIds.has(lm.id)) {
+        merged.push(lm);
+      }
+    }
+    return merged;
   } catch (err) {
-    return null;
+    return localMessages;
   }
 }
 
-export async function createMessageInDb(channelId: string, content: string, actingUser: User): Promise<{ success: boolean; message?: ChannelMessage; error?: string }> {
+export async function createMessageInDb(
+  channelId: string,
+  content: string,
+  actingUser: User
+): Promise<{ success: boolean; message?: ChannelMessage; error?: string }> {
+  if (!channelId || !content.trim()) {
+    return { success: false, error: 'Channel ID and message content are required.' };
+  }
+
+  const isAuthorUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(actingUser.id);
+  const isChanUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(channelId);
+  let targetChannelUuid = channelId;
+
   if (supabase) {
     try {
-      const { data, error } = await supabase
-        .from('channel_messages')
-        .insert({
-          channel_id: channelId,
-          author_id: actingUser.id,
-          content,
-        })
-        .select('*')
-        .single();
+      const localChannels = getLocalChannels();
+      let matchedChannel = localChannels.find(
+        (c) => c.id === targetChannelUuid || c.id === channelId || c.slug === channelId || c.name === channelId
+      );
 
-      if (error) return { success: false, error: error.message };
+      if (!isChanUuid) {
+        if (matchedChannel && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(matchedChannel.id)) {
+          targetChannelUuid = matchedChannel.id;
+        } else {
+          const { data: dbChan } = await supabase
+            .from('channels')
+            .select('id, slug, name')
+            .or(`slug.eq.${channelId},name.eq.${channelId}`)
+            .limit(1)
+            .maybeSingle();
+          if (dbChan?.id) {
+            targetChannelUuid = dbChan.id;
+            matchedChannel = { ...(matchedChannel || {}), id: dbChan.id, slug: dbChan.slug, name: dbChan.name } as any;
+          }
+        }
+      }
 
-      if (data) {
-        const createdMsg: ChannelMessage = {
-          id: data.id,
-          author: actingUser,
-          createdAt: 'Just now',
-          content,
-          reactions: [],
-          threadRepliesCount: 0,
-        };
-        return { success: true, message: createdMsg };
+      const channelSlug = matchedChannel?.slug || matchedChannel?.name || (!isChanUuid ? channelId : 'general');
+
+      let authorId = actingUser.id;
+      if (!isAuthorUuid) {
+        const { data: authData } = await supabase.auth.getUser();
+        if (authData?.user?.id) {
+          authorId = authData.user.id;
+        }
+      }
+
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(authorId) &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetChannelUuid)) {
+        const { data, error } = await supabase
+          .from('channel_messages')
+          .insert({
+            channel_id: targetChannelUuid,
+            channel_slug: channelSlug,
+            author_id: authorId,
+            content,
+            workspace_id: actingUser.workspaceId || null,
+          })
+          .select('*')
+          .single();
+
+        if (error) {
+          console.warn('Supabase channel_messages insert warning:', error.message);
+          notifyDatabaseFallback('Send Message', error);
+        } else if (data) {
+          const createdMsg: ChannelMessage = {
+            id: data.id,
+            channelId: targetChannelUuid,
+            channel_id: targetChannelUuid,
+            author: actingUser,
+            createdAt: 'Just now',
+            content,
+            reactions: [],
+            threadRepliesCount: 0,
+          };
+          saveLocalMessageForChannel(channelId, createdMsg);
+          if (targetChannelUuid !== channelId) {
+            saveLocalMessageForChannel(targetChannelUuid, createdMsg);
+          }
+          return { success: true, message: createdMsg };
+        }
+      } else {
+        notifyDatabaseFallback(
+          'Send Message',
+          `Cannot sync to server: Author ID (${authorId}) or Channel ID (${targetChannelUuid}) is not a valid UUID.`
+        );
       }
     } catch (err: any) {
-      return { success: false, error: err.message };
+      console.warn('Supabase createMessageInDb error, falling back to local isolated store:', err);
+      notifyDatabaseFallback('Send Message', err);
     }
   }
 
-  return {
-    success: true,
-    message: {
-      id: `msg-${Date.now()}`,
-      author: actingUser,
-      createdAt: 'Just now',
-      content,
-      reactions: [],
-      threadRepliesCount: 0,
-    },
+  // Fallback to local store with strict channel isolation
+  const createdMsg: ChannelMessage = {
+    id: `msg-${Date.now()}`,
+    channelId,
+    channel_id: channelId,
+    author: actingUser,
+    createdAt: 'Just now',
+    content,
+    reactions: [],
+    threadRepliesCount: 0,
   };
+  saveLocalMessageForChannel(channelId, createdMsg);
+  return { success: true, message: createdMsg };
 }
 
 
@@ -1569,7 +2081,7 @@ export async function submitReviewDecision(
   // 1. Update Supabase if configured
   if (supabase) {
     try {
-      await supabase
+      const { error: reviewError } = await supabase
         .from('reviews')
         .update({
           status: decision,
@@ -1579,17 +2091,26 @@ export async function submitReviewDecision(
         })
         .eq('id', reviewId);
 
+      if (reviewError) {
+        notifyDatabaseFallback('Submit Review Decision', reviewError);
+      }
+
       if (updatedReview.taskId) {
-        await supabase
+        const { error: taskError } = await supabase
           .from('tasks')
           .update({
             status: nextTaskStatus,
             updated_at: nowIso,
           })
           .eq('id', updatedReview.taskId);
+
+        if (taskError) {
+          notifyDatabaseFallback('Update Review Task Status', taskError);
+        }
       }
     } catch (err) {
       console.warn('Supabase DB call for review decision failed:', err);
+      notifyDatabaseFallback('Submit Review Decision', err);
     }
   }
 
@@ -1647,11 +2168,13 @@ export function exportReviewsAuditCsv(reviews: Review[]): string {
  */
 export function getLocalProjects(): Project[] {
   try {
-    const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(PROJECTS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
       }
     }
   } catch (err) {
@@ -1665,28 +2188,32 @@ export function getLocalProjects(): Project[] {
  */
 export function saveLocalProjects(projects: Project[]): void {
   try {
-    localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+    }
   } catch (err) {
     console.warn('Failed to save local projects:', err);
   }
 }
 
 /**
- * Retrieves cached channels from localStorage with fallback to CHANNELS
+ * Retrieves cached channels from localStorage with fallback to CHANNELS (filters out soft-deleted channels)
  */
 export function getLocalChannels(): Channel[] {
   try {
-    const raw = localStorage.getItem(CHANNELS_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(CHANNELS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.filter((c: any) => !c.deletedAt && !c.deleted_at);
+        }
       }
     }
   } catch (err) {
     console.warn('Failed to parse local channels:', err);
   }
-  return [...CHANNELS];
+  return [...CHANNELS.filter((c: any) => !c.deletedAt && !c.deleted_at)];
 }
 
 /**
@@ -1694,10 +2221,252 @@ export function getLocalChannels(): Channel[] {
  */
 export function saveLocalChannels(channels: Channel[]): void {
   try {
-    localStorage.setItem(CHANNELS_STORAGE_KEY, JSON.stringify(channels));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(CHANNELS_STORAGE_KEY, JSON.stringify(channels));
+    }
   } catch (err) {
     console.warn('Failed to save local channels:', err);
   }
+}
+
+/**
+ * Fetches channels from Supabase "channels" table with fallback to local storage.
+ * Filters out soft-deleted channels (deleted_at is null).
+ */
+export async function fetchChannelsFromDb(): Promise<Channel[]> {
+  const localChannels = getLocalChannels();
+  if (!supabase || !isSupabaseConfigured) {
+    return localChannels;
+  }
+  try {
+    const { data, error } = await supabase
+      .from('channels')
+      .select('*')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: true });
+
+    if (error || !data || data.length === 0) {
+      return localChannels;
+    }
+
+    const mapped: Channel[] = data.map((d: any) => ({
+      id: d.id,
+      name: d.name,
+      slug: d.slug || d.name,
+      description: d.description || '',
+      unreadCount: 0,
+      membersCount: 1,
+      icon: (d.slug === 'general' || d.name === 'general') ? 'campaign' : 'tag',
+      isMandatory: Boolean(d.is_mandatory),
+      isProtected: Boolean(d.is_protected) || d.slug === 'general' || d.name === 'general',
+      deletedAt: d.deleted_at || null,
+      deletedBy: d.deleted_by || null,
+    }));
+
+    saveLocalChannels(mapped);
+    return mapped;
+  } catch (err) {
+    console.warn('fetchChannelsFromDb failed, falling back to local cache:', err);
+    return localChannels;
+  }
+}
+
+/**
+ * Creates a new channel in Supabase "channels" table.
+ * Enforces role check: Only Team Lead and Administrator roles can create channels.
+ */
+export async function createChannelInDb(
+  channel: { id?: string; name: string; slug?: string; description?: string; isMandatory?: boolean; isProtected?: boolean },
+  actingUser: User
+): Promise<{ success: boolean; channel?: Channel; error?: string }> {
+  if (actingUser.role !== 'admin' && actingUser.role !== 'lead') {
+    return {
+      success: false,
+      error: 'Permission denied: Only Team Leads and Administrators can create channels.',
+    };
+  }
+
+  const cleanName = channel.name.trim().toLowerCase().replace(/^#+/, '').replace(/\s+/g, '-');
+  const slug = channel.slug || cleanName;
+  const isProtected = slug === 'general' || cleanName === 'general' || Boolean(channel.isProtected);
+  const newChan: Channel = {
+    id: cleanName,
+    name: cleanName,
+    slug,
+    description: channel.description || '',
+    unreadCount: 0,
+    membersCount: 1,
+    icon: (slug === 'general' || cleanName === 'general') ? 'campaign' : 'tag',
+    isMandatory: Boolean(channel.isMandatory) || isProtected,
+    isProtected,
+  };
+
+  if (supabase && isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from('channels')
+        .insert([
+          {
+            name: cleanName,
+            slug,
+            description: channel.description || '',
+            workspace_id: actingUser.workspaceId || null,
+            is_mandatory: newChan.isMandatory,
+            is_protected: isProtected,
+          },
+        ])
+        .select()
+        .single();
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+      if (data) {
+        newChan.id = data.id;
+        newChan.name = data.name || cleanName;
+        newChan.slug = data.slug || slug;
+        newChan.description = data.description || '';
+        newChan.isProtected = Boolean(data.is_protected) || isProtected;
+      }
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Supabase channels insert failed.' };
+    }
+  }
+
+  const current = getLocalChannels();
+  const updated = [...current.filter((c) => c.id !== newChan.id && c.slug !== newChan.slug), newChan];
+  saveLocalChannels(updated);
+
+  return { success: true, channel: newChan };
+}
+
+/**
+ * Deletes / soft-deletes a channel in Supabase "channels" table.
+ * Enforces role check: Only Team Lead and Administrator roles can delete channels.
+ * Protects #general: #general can never be deleted by anyone.
+ * Posts an audit announcement message to #general: e.g. "David Kim deleted #old-project on Oct 15."
+ */
+export async function deleteChannelInDb(
+  channelId: string,
+  channelName: string,
+  actingUser: User
+): Promise<{ success: boolean; error?: string; auditMessage?: ChannelMessage }> {
+  // 1. Role validation: restricted to lead and admin
+  if (actingUser.role !== 'admin' && actingUser.role !== 'lead') {
+    return {
+      success: false,
+      error: 'Permission denied: Only Team Leads and Administrators can delete channels.',
+    };
+  }
+
+  // 2. Protected #general validation
+  const cleanId = channelId.trim().toLowerCase().replace(/^#+/, '');
+  const cleanName = channelName.trim().toLowerCase().replace(/^#+/, '');
+  if (cleanId === 'general' || cleanName === 'general') {
+    return {
+      success: false,
+      error: 'The #general channel is protected and cannot be deleted.',
+    };
+  }
+
+  const currentChannels = getLocalChannels();
+  const targetChannel = currentChannels.find((c) => c.id === channelId || c.slug === cleanName || c.name === cleanName);
+  if (targetChannel?.slug === 'general' || targetChannel?.isProtected) {
+    return {
+      success: false,
+      error: 'The #general channel is protected and cannot be deleted.',
+    };
+  }
+
+  const now = new Date();
+  const dateFormatted = now.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  });
+  const auditContent = `${actingUser.name} deleted #${cleanName} on ${dateFormatted}.`;
+
+  // 3. Supabase soft-delete and system audit message
+  if (supabase && isSupabaseConfigured) {
+    try {
+      // Soft-delete by setting deleted_at timestamp
+      const { error: updateError } = await supabase
+        .from('channels')
+        .update({
+          deleted_at: now.toISOString(),
+          deleted_by: actingUser.id,
+        })
+        .eq('id', channelId);
+
+      if (updateError) {
+        // Fallback to hard delete if deleted_at column is not yet present on remote table
+        console.warn('Soft-delete failed, attempting delete policy:', updateError.message);
+        const { error: delError } = await supabase
+          .from('channels')
+          .delete()
+          .eq('id', channelId);
+
+        if (delError) {
+          return { success: false, error: delError.message };
+        }
+      }
+
+      // Post audit announcement in #general channel using its UUID
+      const { data: genChan } = await supabase
+        .from('channels')
+        .select('id')
+        .or('slug.eq.general,name.eq.general')
+        .limit(1)
+        .maybeSingle();
+
+      if (genChan?.id) {
+        const { error: auditErr } = await supabase.from('channel_messages').insert({
+          channel_id: genChan.id,
+          author_id: actingUser.id,
+          content: `📢 ${auditContent}`,
+          workspace_id: actingUser.workspaceId || null,
+        });
+        if (auditErr) {
+          notifyDatabaseFallback('Post Deletion Audit Announcement', auditErr);
+        }
+      }
+    } catch (err: any) {
+      console.warn('Supabase deleteChannelInDb error:', err);
+      notifyDatabaseFallback('Delete Channel', err);
+    }
+  }
+
+  // 4. Update local storage channels (immediately purge from cached list)
+  const current = getLocalChannels();
+  const updated = current.filter(
+    (c) => c.id !== channelId && c.slug !== cleanName && c.name !== channelName && c.name !== cleanName
+  );
+  saveLocalChannels(updated);
+
+  // 5. Create audit message object
+  const auditMessage: ChannelMessage = {
+    id: `msg-audit-${Date.now()}`,
+    channelId: 'general',
+    channel_id: 'general',
+    author: actingUser,
+    createdAt: 'Just now',
+    content: `📢 ${auditContent}`,
+    reactions: [],
+    threadRepliesCount: 0,
+  };
+
+  // Cache audit announcement locally for #general
+  saveLocalMessageForChannel('general', auditMessage);
+  try {
+    const AUDIT_STORAGE_KEY = 'teamhub_audit_messages';
+    const rawAudit = localStorage.getItem(AUDIT_STORAGE_KEY);
+    const auditList: ChannelMessage[] = rawAudit ? JSON.parse(rawAudit) : [];
+    auditList.push(auditMessage);
+    localStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(auditList));
+  } catch (e) {
+    // ignore
+  }
+
+  return { success: true, auditMessage };
 }
 
 /**
@@ -1902,25 +2671,30 @@ export async function createProjectInDb(
 
       if (error) {
         console.warn('Supabase projects table insert notice:', error.message);
+        notifyDatabaseFallback('Create Project', error);
       } else if (data) {
         newProject.id = data.id;
       }
     } catch (err) {
       console.warn('Supabase project call failed:', err);
+      notifyDatabaseFallback('Create Project', err);
     }
 
     try {
       // Also register channel in channels table if exists
-      await supabase.from('channels').upsert([
+      const { error: chErr } = await supabase.from('channels').upsert([
         {
-          id: newChannel.id,
           name: newChannel.name,
+          slug: channelSlug,
           description: newChannel.description,
-          members_count: newChannel.membersCount,
+          workspace_id: creator.workspaceId || null,
         },
-      ]);
+      ], { onConflict: 'workspace_id,slug' });
+      if (chErr) {
+        notifyDatabaseFallback('Create Project Workstream Channel', chErr);
+      }
     } catch (chErr) {
-      // ignore
+      notifyDatabaseFallback('Create Project Workstream Channel', chErr);
     }
   }
 
@@ -2008,9 +2782,13 @@ export async function saveDocumentationToFile(
     try {
       const blob = new Blob([markdownContent], { type: 'text/markdown' });
       const path = `${uploader.id}/${Date.now()}_${cleanName}`;
-      await supabase.storage.from('files').upload(path, blob, { upsert: true, contentType: 'text/markdown' });
+      const { error: uploadError } = await supabase.storage.from('files').upload(path, blob, { upsert: true, contentType: 'text/markdown' });
+      if (uploadError) {
+        notifyDatabaseFallback('Save Documentation File', uploadError);
+      }
     } catch (err) {
       console.warn('Supabase storage upload fallback:', err);
+      notifyDatabaseFallback('Save Documentation File', err);
     }
   }
 

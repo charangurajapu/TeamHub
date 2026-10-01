@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { User, DeviceMode, ViewMode } from '../../types';
+import { User, ViewMode } from '../../types';
+import { useSidebar } from '../../context/SidebarContext';
 
 interface HeaderProps {
   currentUser: User;
@@ -7,8 +8,6 @@ interface HeaderProps {
   onLogout: () => void;
   onSelectUser?: (userKey: string) => void;
   users?: Record<string, User>;
-  deviceMode: DeviceMode;
-  onSelectDeviceMode: (mode: DeviceMode) => void;
   onOpenAiDrawer: () => void;
   onOpenCommandPalette: () => void;
   onQuickNewTask: () => void;
@@ -19,70 +18,54 @@ export const Header: React.FC<HeaderProps> = ({
   onNavigate,
   onLogout,
   onSelectUser,
-  users,
-  deviceMode,
-  onSelectDeviceMode,
   onOpenAiDrawer,
   onOpenCommandPalette,
   onQuickNewTask,
 }) => {
+  const { isCollapsed, toggleMobileSidebar } = useSidebar();
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notificationsRead, setNotificationsRead] = useState(false);
-  // Dev mode flag is OFF by default so persona switcher never appears in real app
-  const [devModeEnabled, setDevModeEnabled] = useState(false);
 
   return (
-    <header className="fixed top-0 left-0 right-0 lg:left-[260px] h-16 bg-[#ffffff]/90 backdrop-blur-md border-b border-[#eaedff] z-40 px-4 md:px-8 flex items-center justify-between shadow-xs">
-      {/* Search Input Bar (Cmd+K) */}
-      <div className="flex items-center gap-4 flex-1 max-w-lg">
+    <header
+      className={`fixed top-0 left-0 right-0 ${
+        isCollapsed ? 'lg:left-[72px]' : 'lg:left-[260px]'
+      } h-16 bg-[#ffffff]/90 backdrop-blur-md border-b border-[#eaedff] z-40 px-3 sm:px-6 md:px-8 flex items-center justify-between shadow-xs transition-[left] duration-300 ease-in-out`}
+    >
+      {/* Left Area: Mobile Menu Trigger + Search Bar */}
+      <div className="flex items-center gap-2 sm:gap-4 flex-1 max-w-xl md:max-w-2xl">
         <button
-          onClick={onOpenCommandPalette}
-          className="relative w-full flex items-center text-left py-2 pl-10 pr-20 rounded-[14px] bg-[#f2f3ff] border border-[#eaedff] text-[14px] text-[#3e4a3d] hover:border-[#006b2c] hover:bg-[#ffffff] transition-all cursor-pointer shadow-xs"
+          type="button"
+          onClick={toggleMobileSidebar}
+          className="lg:hidden flex items-center justify-center p-2 rounded-xl text-[#3e4a3d] hover:text-[#131b2e] hover:bg-[#eaedff] transition-colors cursor-pointer shrink-0"
+          title="Open Navigation"
+          aria-label="Open Navigation"
         >
-          <span className="material-symbols-outlined absolute left-3 text-[#6e7b6c] text-[20px] pointer-events-none">
+          <span className="material-symbols-outlined text-[24px]">menu</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenCommandPalette}
+          className="relative w-full flex items-center text-left py-2 pl-9 sm:pl-10 pr-12 sm:pr-20 rounded-[14px] bg-[#f2f3ff] border border-[#eaedff] text-[13px] sm:text-[14px] text-[#3e4a3d] hover:border-[#006b2c] hover:bg-[#ffffff] transition-all cursor-pointer shadow-xs"
+        >
+          <span className="material-symbols-outlined absolute left-3 text-[#6e7b6c] text-[18px] sm:text-[20px] pointer-events-none">
             search
           </span>
           <span className="truncate text-[#6e7b6c]">Search tasks, channels, docs...</span>
-          <div className="absolute right-2.5 flex items-center gap-0.5 px-2 py-0.5 rounded border border-[#eaedff] bg-[#ffffff] text-[11px] font-semibold text-[#3e4a3d] shadow-2xs pointer-events-none">
+          <div className="absolute right-2.5 hidden sm:flex items-center gap-0.5 px-2 py-0.5 rounded border border-[#eaedff] bg-[#ffffff] text-[11px] font-semibold text-[#3e4a3d] shadow-2xs pointer-events-none">
             <span>⌘</span>
             <span>K</span>
           </div>
         </button>
       </div>
 
-      {/* Right Controls: Device Mode Switcher, Quick Actions, Profile Menu */}
-      <div className="flex items-center gap-2 sm:gap-4">
-        {/* Device Switcher (Desktop vs Mobile Prototype) */}
-        <div className="flex items-center p-1 rounded-xl bg-[#f2f3ff] border border-[#eaedff]">
-          <button
-            onClick={() => onSelectDeviceMode('desktop')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-              deviceMode === 'desktop'
-                ? 'bg-[#ffffff] text-[#006b2c] shadow-xs'
-                : 'text-[#3e4a3d] hover:text-[#131b2e]'
-            }`}
-            title="Desktop Workspace View"
-          >
-            <span className="material-symbols-outlined text-[16px]">desktop_windows</span>
-            <span className="hidden sm:inline">Desktop</span>
-          </button>
-          <button
-            onClick={() => onSelectDeviceMode('mobile-framed')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-              deviceMode === 'mobile-framed'
-                ? 'bg-[#ffffff] text-[#006b2c] shadow-xs'
-                : 'text-[#3e4a3d] hover:text-[#131b2e]'
-            }`}
-            title="React Native Mobile Prototype (Phone Frame)"
-          >
-            <span className="material-symbols-outlined text-[16px]">smartphone</span>
-            <span className="hidden sm:inline">Mobile App</span>
-          </button>
-        </div>
-
+      {/* Right Controls: Quick Actions, AI Assistant, Notifications, Profile Menu */}
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-3">
         {/* Quick New Action */}
         <button
+          type="button"
           onClick={onQuickNewTask}
           className="flex items-center gap-1 px-3 py-1.5 rounded-[12px] bg-[#006b2c] text-white text-xs font-semibold hover:bg-[#00873a] transition-all shadow-xs cursor-pointer active:scale-95"
         >
@@ -92,17 +75,19 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Ask AI Pill Button */}
         <button
+          type="button"
           onClick={onOpenAiDrawer}
           className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-[12px] bg-[#7ffc97]/30 hover:bg-[#7ffc97]/50 text-[#005320] text-xs font-semibold transition-colors cursor-pointer"
-          title="Open AI Copilot Drawer"
+          title="Open AI Assistant Drawer"
         >
           <span className="material-symbols-outlined text-[17px] text-[#006b2c]">auto_awesome</span>
-          <span>Copilot</span>
+          <span>AI Assistant</span>
         </button>
 
         {/* Notifications Icon with Indicator */}
         <div className="relative">
           <button
+            type="button"
             onClick={() => {
               setShowNotifications(!showNotifications);
               setNotificationsRead(true);
@@ -154,7 +139,8 @@ export const Header: React.FC<HeaderProps> = ({
                   <span className="w-2 h-2 rounded-full bg-[#0051d5] mt-1 shrink-0"></span>
                   <div>
                     <p className="text-[#131b2e] leading-snug">
-                      Sprint 42 milestone goal achieved: <strong className="font-medium text-[#0051d5] underline">18 tasks completed</strong>
+                      Sprint 42 milestone goal achieved:{' '}
+                      <strong className="font-medium text-[#0051d5] underline">18 tasks completed</strong>
                     </p>
                     <span className="text-[10px] text-[#6e7b6c] mt-0.5 block">1h ago • Click to open & highlight Sprint 42 board</span>
                   </div>
@@ -172,7 +158,8 @@ export const Header: React.FC<HeaderProps> = ({
                   <span className="w-2 h-2 rounded-full bg-[#8d4b00] mt-1 shrink-0"></span>
                   <div>
                     <p className="text-[#131b2e] leading-snug">
-                      <strong className="font-semibold">Elena Chen</strong> marked question <span className="text-[#006b2c] font-medium underline">Q-4823</span> resolved
+                      <strong className="font-semibold">Elena Chen</strong> marked question{' '}
+                      <span className="text-[#006b2c] font-medium underline">Q-4823</span> resolved
                     </p>
                     <span className="text-[10px] text-[#6e7b6c] mt-0.5 block">2h ago • Click to open & highlight resolved question</span>
                   </div>
@@ -187,6 +174,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Current User Profile Menu Button */}
         <div className="relative">
           <button
+            type="button"
             onClick={() => setShowUserDropdown(!showUserDropdown)}
             className="flex items-center gap-2 p-1 pl-1.5 pr-2 rounded-full bg-[#f2f3ff] hover:bg-[#eaedff] border border-[#eaedff] transition-all cursor-pointer"
             title="User Profile Menu"
@@ -231,13 +219,15 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
                   <span className="text-[11px] text-[#6e7b6c] truncate">{currentUser.email}</span>
                   <div className="mt-1">
-                    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase ${
-                      currentUser.role === 'admin'
-                        ? 'bg-[#ffdcc3] text-[#8d4b00]'
-                        : currentUser.role === 'lead'
-                        ? 'bg-[#dbe1ff] text-[#0051d5]'
-                        : 'bg-[#d8f8dc] text-[#006b2c]'
-                    }`}>
+                    <span
+                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wide uppercase ${
+                        currentUser.role === 'admin'
+                          ? 'bg-[#ffdcc3] text-[#8d4b00]'
+                          : currentUser.role === 'lead'
+                          ? 'bg-[#dbe1ff] text-[#0051d5]'
+                          : 'bg-[#d8f8dc] text-[#006b2c]'
+                      }`}
+                    >
                       <span className="material-symbols-outlined text-[10px]">
                         {currentUser.role === 'admin' ? 'shield' : currentUser.role === 'lead' ? 'verified_user' : 'person'}
                       </span>
@@ -252,6 +242,7 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Navigation Menu Options */}
               <div className="py-1.5 space-y-0.5">
                 <button
+                  type="button"
                   onClick={() => {
                     onNavigate('profile-settings');
                     setShowUserDropdown(false);
@@ -263,6 +254,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => {
                     onNavigate('my-work');
                     setShowUserDropdown(false);
@@ -275,6 +267,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                 {(currentUser.role === 'lead' || currentUser.role === 'admin') && (
                   <button
+                    type="button"
                     onClick={() => {
                       onNavigate('reviews');
                       setShowUserDropdown(false);
@@ -288,6 +281,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                 {currentUser.role === 'admin' && (
                   <button
+                    type="button"
                     onClick={() => {
                       onNavigate('admin-center');
                       setShowUserDropdown(false);
@@ -300,27 +294,10 @@ export const Header: React.FC<HeaderProps> = ({
                 )}
               </div>
 
-              {/* Developer Mode Section (Off by default, persona switcher hidden in real app) */}
-              <div className="border-t border-[#eaedff] pt-2 pb-1 px-1">
-                <div className="flex items-center justify-between px-2 py-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="material-symbols-outlined text-[14px] text-[#6e7b6c]">bug_report</span>
-                    <span className="text-[11px] font-semibold text-[#6e7b6c]">Developer Mode</span>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={devModeEnabled}
-                      onChange={(e) => setDevModeEnabled(e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-7 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-[#006b2c]"></div>
-                  </label>
-                </div>
-
-                {/* Only shown when Dev Mode is explicitly enabled */}
-                {devModeEnabled && onSelectUser && (
-                  <div className="mt-1.5 p-1 bg-[#f2f3ff] rounded-xl border border-[#eaedff] animate-in fade-in duration-100">
+              {/* Developer Persona Switcher: Only rendered if VITE_DEV_MODE=true is explicitly set in environment */}
+              {import.meta.env.VITE_DEV_MODE === 'true' && onSelectUser && (
+                <div className="border-t border-[#eaedff] pt-2 pb-1 px-1">
+                  <div className="p-1 bg-[#f2f3ff] rounded-xl border border-[#eaedff]">
                     <div className="px-2 py-1 text-[10px] font-semibold text-[#8d4b00] uppercase tracking-wider flex items-center justify-between">
                       <span>Switch Persona (Dev Only)</span>
                       <span className="px-1 rounded bg-[#ffdcc3] text-[#8d4b00] text-[9px]">DEV</span>
@@ -328,6 +305,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                     <div className="space-y-0.5">
                       <button
+                        type="button"
                         onClick={() => {
                           onSelectUser('sarah');
                           setShowUserDropdown(false);
@@ -345,6 +323,7 @@ export const Header: React.FC<HeaderProps> = ({
                       </button>
 
                       <button
+                        type="button"
                         onClick={() => {
                           onSelectUser('david');
                           setShowUserDropdown(false);
@@ -362,6 +341,7 @@ export const Header: React.FC<HeaderProps> = ({
                       </button>
 
                       <button
+                        type="button"
                         onClick={() => {
                           onSelectUser('admin');
                           setShowUserDropdown(false);
@@ -379,12 +359,13 @@ export const Header: React.FC<HeaderProps> = ({
                       </button>
                     </div>
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Working Logout Button */}
               <div className="border-t border-[#eaedff] pt-1.5 mt-1">
                 <button
+                  type="button"
                   onClick={() => {
                     setShowUserDropdown(false);
                     onLogout();

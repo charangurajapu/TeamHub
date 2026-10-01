@@ -32,22 +32,6 @@ const INITIAL_ADMIN_CHANNELS: DefaultChannel[] = [
     tag: 'Mandatory',
     isMandatory: true,
   },
-  {
-    id: 'announcements',
-    name: 'announcements',
-    desc: 'Official updates and important notices from leads',
-    tag: 'Broadcast',
-  },
-  {
-    id: 'random',
-    name: 'random',
-    desc: 'Casual banter, coffee breaks, and celebrations',
-  },
-  {
-    id: 'product-launch',
-    name: 'product-launch',
-    desc: 'Deliverables, sprint targets, and demo milestones',
-  },
 ];
 
 export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onWaitingApproval, knownUsers }) => {
@@ -397,20 +381,29 @@ export const AuthView: React.FC<AuthViewProps> = ({ onSuccess, onWaitingApproval
       if (supabase) {
         try {
           const channelRows = channels.map((ch) => ({
-            id: ch.name,
             name: ch.name,
+            slug: ch.name,
             description: ch.desc,
             is_mandatory: ch.isMandatory || false,
+            is_protected: ch.name === 'general',
             created_at: new Date().toISOString(),
           }));
-          await supabase.from('channels').upsert(channelRows);
+          await supabase.from('channels').upsert(channelRows, { onConflict: 'workspace_id,slug' });
         } catch (chErr) {
           console.info('Supabase channels table record notice:', chErr);
         }
       }
 
       try {
-        localStorage.setItem('teamhub_channels', JSON.stringify(channels));
+        const formattedChannels = channels.map((c) => ({
+          id: c.name,
+          name: c.name,
+          description: c.desc || 'Team discussion channel',
+          unreadCount: 0,
+          membersCount: 1,
+          icon: c.name === 'general' ? 'campaign' : 'tag',
+        }));
+        localStorage.setItem('teamhub_channels', JSON.stringify(formattedChannels));
       } catch (storageErr) {
         // ignore
       }
