@@ -3,10 +3,18 @@ import { fetchTasksFromDb, fetchMessagesFromDb, fetchQuestionsFromDb } from './s
 import { INITIAL_TASKS, INITIAL_CHANNEL_MESSAGES, INITIAL_QUESTIONS } from '../data/mockData';
 
 // Retrieve API Keys from Vite env or runtime window
+// SECURITY WARNING: In client-side SPA architectures, VITE_* keys are embedded into the browser bundle.
+// For production deployments, all LLM calls should be migrated behind a secure server-side proxy or Supabase Edge Function.
+const openAiApiKey = import.meta.env.VITE_OPENAI_API_KEY || import.meta.env.OPENAI_API_KEY || '';
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY || '';
 const groqApiKey = import.meta.env.VITE_GROQ_API_KEY || import.meta.env.GROQ_API_KEY || '';
 
 // Configurable Model Names with defaults
+export const OPENAI_MODEL =
+  import.meta.env.VITE_OPENAI_MODEL ||
+  import.meta.env.OPENAI_MODEL ||
+  'gpt-4o-mini';
+
 export const GEMINI_PRIMARY_MODEL =
   import.meta.env.VITE_GEMINI_PRIMARY_MODEL ||
   import.meta.env.GEMINI_PRIMARY_MODEL ||
@@ -24,6 +32,11 @@ export const GROQ_MODEL =
   import.meta.env.GROQ_MODEL ||
   'openai/gpt-oss-120b';
 
+export const isOpenAiConfigured = Boolean(
+  openAiApiKey &&
+  !openAiApiKey.includes('YOUR_OPENAI_API_KEY') &&
+  !openAiApiKey.includes('MY_OPENAI_API_KEY')
+);
 export const isGeminiConfigured = Boolean(apiKey && !apiKey.includes('MY_GEMINI_API_KEY'));
 export const isGroqConfigured = Boolean(groqApiKey && !groqApiKey.includes('MY_GROQ_API_KEY'));
 
@@ -84,6 +97,124 @@ Keep your responses concise, professional, and well-structured using markdown. F
 const delay = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 /**
+ * Calls OpenAI's chat completions API (https://api.openai.com/v1/chat/completions)
+ * using native fetch() without requiring external SDKs.
+ * Uses the configured model (defaults to OPENAI_MODEL / "gpt-4o-mini").
+ * Formats conversation context and history into OpenAI-style role/content message pairs.
+ */
+export async function generateOpenAIAssistantResponse(
+  userPrompt: string,
+  history?: Array<{ role: 'user' | 'model'; text: string }>,
+  customSystemInstruction?: string
+): Promise<{ text: string; error?: string }> {
+  if (!isOpenAiConfigured) {
+    return {
+      text: '',
+      error: 'OPENAI_API_KEY is not configured or placeholder detected.',
+    };
+  }
+
+  try {
+    const liveContext = await getLiveSupabaseContext();
+    const systemInstruction = customSystemInstruction || `${BASE_SYSTEM_INSTRUCTION}\n\n${liveContext}`;
+
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+      {
+        role: 'system',
+        content: systemInstruction,
+      },
+    ];
+
+    if (history && history.length > 0) {
+      for (const h of history) {
+        messages.push({
+          role: h.role === 'model' ? 'assistant' : 'user',
+          content: h.text,
+        });
+      }
+    }
+
+    messages.push({
+      role: 'user',
+      content: userPrompt,
+    });
+
+    const endpointUrl = 'https://api.openai.com/v1/chat/completions';
+    const requestPayload = {
+      model: OPENAI_MODEL,
+      messages,
+      temperature: 0.7,
+      max_tokens: 1024,
+    };
+
+    console.log(`[AI] Trying OpenAI (${OPENAI_MODEL})...`);
+
+    // Timeout safety with AbortController (20s)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+    let res: Response;
+    try {
+      res = await fetch(endpointUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openAiApiKey}`,
+        },
+        body: JSON.stringify(requestPayload),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (!res.ok) {
+      const errBody = await res.text();
+      let safeErrorMessage = `OpenAI API Error (${res.status}): ${res.statusText || 'Request failed'}`;
+      try {
+        const parsed = JSON.parse(errBody);
+        if (parsed?.error?.message) {
+          // Sanitize any key patterns that might appear in upstream messages
+          safeErrorMessage = `OpenAI API Error (${res.status}): ${String(parsed.error.message).replace(/sk-[a-zA-Z0-9_-]+/g, '***REDACTED***')}`;
+        }
+      } catch {
+        // Fall back to safe status text
+      }
+
+      console.warn(`[AI] OpenAI failed (${res.status}): ${safeErrorMessage}`);
+      return {
+        text: '',
+        error: safeErrorMessage,
+      };
+    }
+
+    const data = await res.json();
+    const replyText = data.choices?.[0]?.message?.content?.trim();
+
+    if (!replyText || typeof replyText !== 'string') {
+      console.warn('[AI] Empty or malformed content returned from OpenAI API.');
+      return {
+        text: '',
+        error: 'OpenAI API returned an empty or malformed response.',
+      };
+    }
+
+    console.log(`[AI] Served by: OpenAI (${OPENAI_MODEL})`);
+    return { text: replyText };
+  } catch (err: any) {
+    const isTimeout = err?.name === 'AbortError';
+    const errMsg = isTimeout
+      ? 'OpenAI request timed out after 20s'
+      : String(err?.message || 'Network error connecting to OpenAI API').replace(/sk-[a-zA-Z0-9_-]+/g, '***REDACTED***');
+    console.warn('[AI] OpenAI exception:', errMsg);
+    return {
+      text: '',
+      error: errMsg,
+    };
+  }
+}
+
+/**
  * Calls Groq's chat completions API (OpenAI-compatible endpoint: https://api.groq.com/openai/v1/chat/completions)
  * using the configured model (defaults to GROQ_MODEL / "openai/gpt-oss-120b").
  * Formats conversation context and history into OpenAI-style role/content message pairs.
@@ -134,14 +265,7 @@ export async function generateGroqAssistantResponse(
       max_tokens: 1024,
     };
 
-    console.log('[Groq API Outgoing Request]', {
-      endpoint: endpointUrl,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ***REDACTED***',
-      },
-      body: requestPayload,
-    });
+    console.log(`[AI] Trying Groq (${GROQ_MODEL})...`);
 
     const res = await fetch(endpointUrl, {
       method: 'POST',
@@ -188,11 +312,23 @@ export async function generateGroqAssistantResponse(
 }
 
 /**
- * Generates an AI response for TeamHUB prompt input using Gemini API with automatic Groq fallback.
- * Provider chain:
- * 1. Primary: Gemini Primary Model (configured via GEMINI_PRIMARY_MODEL, defaults to "gemini-3.8-flash")
- * 2. Secondary fallback: Gemini Fallback Model (configured via GEMINI_FALLBACK_MODEL, defaults to "gemini-3.7-flash")
- * 3. Final fallback: Groq (configured via GROQ_MODEL, defaults to "openai/gpt-oss-120b")
+ * Returns a simulated context-aware response when no live AI API key is configured or when offline.
+ */
+function getSimulatedOfflineResponse(userPrompt: string): string {
+  const lower = userPrompt.toLowerCase();
+  if (lower.includes('standup') || lower.includes('update')) {
+    return `Ready for Daily Standup:\nDONE: Audited high-contrast modal design tokens against WCAG AA requirements.\nDOING: Implementing drag-and-drop file upload component.\nBLOCKED: None.`;
+  }
+  return `Based on live Supabase workspace data:\nI have evaluated your request against the current Sprint 42 backlog and design stream.\n\nRecommendation: Proceed with atomic database mutations and update the active task board.`;
+}
+
+/**
+ * Generates an AI response for TeamHUB prompt input using the resilient multi-tier fallback chain:
+ * 1. Primary: OpenAI (configured via OPENAI_MODEL, defaults to "gpt-4o-mini")
+ * 2. Secondary: Gemini Primary Model (configured via GEMINI_PRIMARY_MODEL, defaults to "gemini-3.8-flash" with retries)
+ * 3. Tertiary: Gemini Fallback Model (configured via GEMINI_FALLBACK_MODEL, defaults to "gemini-3.7-flash")
+ * 4. Quaternary: Groq (configured via GROQ_MODEL, defaults to "openai/gpt-oss-120b")
+ * 5. Quinary: Offline simulated keyword / workspace fallback
  */
 export async function generateGeminiAssistantResponse(
   userPrompt: string,
@@ -201,10 +337,28 @@ export async function generateGeminiAssistantResponse(
   const liveContext = await getLiveSupabaseContext();
   const systemInstruction = `${BASE_SYSTEM_INSTRUCTION}\n\n${liveContext}`;
 
+  // ============================================================
+  // STEP 1: OPENAI PRIMARY
+  // ============================================================
+  if (isOpenAiConfigured) {
+    try {
+      const openAiRes = await generateOpenAIAssistantResponse(userPrompt, history, systemInstruction);
+      if (openAiRes.text && !openAiRes.error) {
+        return { text: openAiRes.text };
+      }
+      console.log('[AI] OpenAI failed, trying Gemini...');
+    } catch (openAiErr) {
+      console.warn('[AI] OpenAI exception, trying Gemini...', openAiErr);
+    }
+  }
+
+  // ============================================================
+  // STEP 2: GEMINI PRIMARY & FALLBACK (OR GROQ IF GEMINI UNCONFIGURED)
+  // ============================================================
   // If Gemini client is not initialized, try Groq directly if configured
   if (!ai) {
     if (isGroqConfigured) {
-      console.log(`[AI Provider] Gemini not configured. Directly calling Groq (${GROQ_MODEL})...`);
+      console.log(`[AI] Gemini not configured, trying Groq (${GROQ_MODEL})...`);
       try {
         const groqRes = await generateGroqAssistantResponse(userPrompt, history, systemInstruction);
         if (groqRes.text && !groqRes.error) {
@@ -215,17 +369,8 @@ export async function generateGeminiAssistantResponse(
       }
     }
 
-    // Return intelligent context-aware response when no live AI API key is configured
-    let simulatedText = '';
-    const lower = userPrompt.toLowerCase();
-
-    if (lower.includes('standup') || lower.includes('update')) {
-      simulatedText = `Ready for Daily Standup:\nDONE: Audited high-contrast modal design tokens against WCAG AA requirements.\nDOING: Implementing drag-and-drop file upload component.\nBLOCKED: None.`;
-    } else {
-      simulatedText = `Based on live Supabase workspace data:\nI have evaluated your request against the current Sprint 42 backlog and design stream.\n\nRecommendation: Proceed with atomic database mutations and update the active task board.`;
-    }
-
-    return { text: simulatedText };
+    console.log('[AI] Groq failed, using offline fallback');
+    return { text: getSimulatedOfflineResponse(userPrompt) };
   }
 
   const contents: any[] = [];
@@ -363,8 +508,10 @@ export async function generateGeminiAssistantResponse(
         }
       }
 
-      // Final fallback: Groq API (GROQ_MODEL)
-      console.warn(`[AI Fallback] Gemini models exhausted. Calling Groq fallback (${GROQ_MODEL})...`);
+      // ============================================================
+      // STEP 3: GROQ TERTIARY FALLBACK (GROQ_MODEL)
+      // ============================================================
+      console.log('[AI] Gemini failed, trying Groq...');
       try {
         const groqRes = await generateGroqAssistantResponse(userPrompt, history, systemInstruction);
         if (groqRes.text && !groqRes.error) {
@@ -373,6 +520,18 @@ export async function generateGeminiAssistantResponse(
         console.warn('[Groq Fallback Notice] Groq fallback did not produce a response:', groqRes.error);
       } catch (groqErr) {
         console.error('[Groq Fallback Exception]', groqErr);
+      }
+
+      // ============================================================
+      // STEP 4: OFFLINE SIMULATED FALLBACK
+      // ============================================================
+      console.log('[AI] Groq failed, using offline fallback');
+
+      const lower = userPrompt.toLowerCase();
+      if (lower.includes('standup') || lower.includes('update')) {
+        return {
+          text: getSimulatedOfflineResponse(userPrompt),
+        };
       }
 
       const friendlyMessage = isOverloadedOr503
@@ -387,7 +546,7 @@ export async function generateGeminiAssistantResponse(
   }
 
   // Final fallback attempt if retry loop completes without returning
-  console.warn(`[AI Fallback] Retries exhausted. Calling Groq fallback (${GROQ_MODEL})...`);
+  console.log('[AI] Gemini failed, trying Groq...');
   try {
     const groqRes = await generateGroqAssistantResponse(userPrompt, history, systemInstruction);
     if (groqRes.text && !groqRes.error) {
@@ -397,8 +556,17 @@ export async function generateGeminiAssistantResponse(
     console.error('[Groq Fallback Exception]', groqErr);
   }
 
+  console.log('[AI] Groq failed, using offline fallback');
+  const lower = userPrompt.toLowerCase();
+  if (lower.includes('standup') || lower.includes('update')) {
+    return {
+      text: getSimulatedOfflineResponse(userPrompt),
+    };
+  }
+
   return {
     text: 'The AI assistant is a bit busy right now — please try again in a moment.',
     error: 'The AI assistant is a bit busy right now — please try again in a moment.',
   };
 }
+

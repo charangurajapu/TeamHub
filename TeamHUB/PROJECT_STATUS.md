@@ -1,181 +1,144 @@
-# TeamHub — Project Status & Handover Document
+# TeamHub — Project Status Document
+
+**Last Updated:** October 2026  
+**Status:** Alpha / Core Functional Prototype  
+**Audience:** Team Members, Project Stakeholders, Academic Supervisors, Incoming Developers  
+
+---
 
 ## 1. Overview
 
-TeamHub is an all-in-one collaborative workspace and team productivity platform designed for agile teams, student project groups, and cross-functional engineering pods. It combines task management (Kanban boards and list views), structured topic-based communication channels, a persistent team Q&A knowledge base, a shared file repository, code/task review workflows, and an intelligent AI Assistant with live workspace awareness. The application is built with a modern web architecture using **React 19** (with TypeScript and Vite), **Vanilla CSS** coupled with a tailored design system supporting light, midnight dark, and system-adaptive themes, **Supabase** (PostgreSQL, Row-Level Security, and Storage) for backend data and authentication, and a multi-tier AI pipeline powered by **Google Gemini** (Gemini 2.5/2.0 Flash) with automated failover to **Groq** (LLaMA/Mixtral models). TeamHub was architected and developed using the Google DeepMind **Antigravity** agentic AI pair-programming platform.
+**TeamHub** is a unified, engineering-first team collaboration and workspace platform engineered to bridge the gap between real-time team communication, sprint task tracking, and contextual knowledge exchange. It synthesizes core patterns from Slack (channels and messaging), Jira (Kanban task boards and sprint tracking), Stack Overflow (structured team Q&A), and Notion (shared documentation and RFC reviews) into a unified interface. The technical stack is built with modern **React 19**, **TypeScript**, and **Vite** on the frontend, styled with custom **Tailwind CSS v4** design tokens, and backed by **Supabase** (PostgreSQL, Row-Level Security policies, and Realtime database listeners). An intelligent workspace co-pilot is integrated across the application using a multi-tier AI fallback engine (**OpenAI GPT-4o-mini**, **Google Gemini 3.8/3.7 Flash**, **Groq LLaMA-3/GPT-OSS**, and contextual offline fallbacks), engineered and developed through **Google Antigravity**.
 
 ---
 
 ## 2. Ready to Use
 
-Every feature listed below has been tested and verified across real user accounts under three distinct roles: **Administrator**, **Team Lead**, and **Team Member**.
+Every feature listed below has been implemented, connected to live database state or reactive stores, and passed functional testing:
 
 ### Auth & Roles
-- **3-Step Admin Onboarding:** Administrators can sign up through an account, workspace, and channel creation wizard, with `#general` created automatically as the default channel.
-- **Unique Pod Codes:** A unique 8-character pod invitation code (e.g. `TH-4821-ENG`) is generated upon workspace setup, complete with a one-click copy button for inviting teammates.
-- **Role-Based Sign-Up:** Team Leads and Team Members can register using a valid pod code and are automatically linked to their assigned workspace and pod.
-- **Pod Code Validation:** Invalid or expired pod invitation codes are immediately rejected with clear error guidance.
-- **Secure Authentication:** Email/password login and logout work reliably across all three roles; logging out completely clears credentials and active session state.
-- **Persistent Sessions:** User sessions and workspace context survive full browser refreshes without logging the user out.
-- **Role-Based Landing:** Administrators are directed straight to the Admin Center upon login, while Team Leads and Team Members land on the main workspace dashboard.
-- **Access Control & Permissions:** Team Members cannot access the Admin Center, User Management, or the workspace-wide Team tab (routes are blocked and navigation items are hidden).
-- **Directory Scoping:** Team Leads only see members belonging to their own pod in the Team directory, while Administrators have full visibility across all workspace members.
-- **Server-Side Security (RLS):** Database Row-Level Security protects sensitive data; testing access against restricted tables returns HTTP 200 for Administrators and HTTP 403 Forbidden for Leads and Members.
-- **Role Immutability Trigger:** Users cannot elevate their own permissions or alter other accounts; role modifications are guarded by a PostgreSQL database trigger.
+- **Account Registration & Login:** Email/password authentication flow with session persistence via Supabase Auth.
+- **Role Enforcement:** Distinct role boundaries (`admin`, `lead`, `member`, `guest`) restricting privileged controls such as user management and channel deletion.
+- **Approval Queue:** New member registration support with an intermediate "Waiting for Approval" screen before access is granted.
+- **Clean Sign-Out:** Instant session invalidation and cache clearing via the user menu.
 
-### Tasks & Kanban
-- **Task Lifecycle Management:** Create, view, update, and advance tasks across four stages: *To Do*, *In Progress*, *Review*, and *Done*.
-- **Kanban & List Views:** Seamless toggle between interactive column-based drag-and-drop boards and dense list layouts.
-- **Multi-Criteria Filtering:** Live filtering by priority level (Low, Medium, High, Urgent), assigned team member, and keyword search.
-- **Task Detail Drawer:** Slide-out inspection drawer supporting checklists/subtasks, threaded comments, and attachment downloads.
-- **Role-Scoped Task Assignment:** Team Leads can only assign tasks to members of their own pod; Administrators assign tasks within project scopes, with server-side RLS enforcement.
-- **Protected Task Deletion:** Only Team Leads and Administrators can delete tasks; Team Members do not have delete permissions.
-- **AI Task Suggestions:** The "Suggest with AI" button in the task drawer recommends checklist items and task breakdowns based on the current title and description.
+### Tasks & Sprint Board
+- **Interactive Kanban Board:** Visual four-column workflow (`Backlog`, `In Progress`, `In Review`, `Done`) with real-time status transitions.
+- **Task Creation & Metadata:** Modals to create tasks with auto-generated issue keys (e.g. `ENG-1042`), markdown descriptions, priority tags (Urgent, High, Medium, Low), and sprint assignment.
+- **Assignee Routing:** Dynamic assignment of tasks to registered team members with real-time avatar indicators.
+- **Empty States:** Graceful empty states when a column or backlog contains zero tasks.
 
-### Channels & Chat
-- **Organized Channels:** Topic-based chat channels with active participant lists and unread message indicators.
-- **Role-Guarded Channel Creation:** Only Administrators and Team Leads can create new channels; the creation button is hidden for Team Members.
-- **Protected `#general` Channel:** The default `#general` channel is permanently protected and cannot be deleted or renamed by any user.
-- **Audited Channel Deletion:** Team Leads and Administrators can delete custom channels, triggering a system audit announcement posted to `#general` recording who performed the deletion and when.
-- **Channel-Isolated Message History:** Each channel maintains its own completely isolated conversation history; messages in `#general`, `#development`, `#design`, and custom channels never leak or cross-contaminate.
-- **Real-Time Cross-Session Synchronization:** Live chat messages synchronize across multiple browser tabs and sessions in real time via Supabase Realtime WebSockets (`channel_messages:${activeChannelId}`) and BroadcastChannel.
-- **Rich Text Composer:** Markdown formatting toolbar allows one-click insertion of bold, italic, inline code, code blocks, bulleted lists, and quotes.
+### Channels & Team Communication
+- **Channel Navigation:** Dedicated channel list with default channels (e.g. `#general`) and custom channel creation.
+- **Message Feed:** Chronological message timelines with author identity, timestamp, formatted text, and auto-scrolling.
+- **Real-Time Data Layer:** Channel messages query Supabase PostgreSQL tables with automatic fallback handling.
 
-### Questions & Knowledge Base
-- **Structured Q&A:** Post technical and operational questions with category tags and project associations.
-- **Community Answers & Voting:** Submit answers, upvote helpful responses, and filter questions by status (All, Solved, Unanswered).
-- **Persistent Bookmarks & Following:** Bookmark important questions and follow topics for updates; selections persist across page reloads.
-- **One-Click Share:** Easily copy a direct link to any question to share with teammates.
-- **Draft with AI:** Clicking "Draft with AI" opens the AI Assistant drawer preloaded with the question context to help structure clear answers.
+### Knowledge Exchange (Q&A)
+- **Threaded Problem Solving:** Discussion board for technical questions, blockers, and architecture inquiries.
+- **Status Lifecycle:** Questions trackable by status (`Open`, `Solved`, `Under Investigation`).
+- **Answer Submissions:** Community answer threads with helpfulness flags and author details.
+- **Database Synchronization:** Live querying of questions and answers from Supabase with zero demo-data leaks when empty.
 
-### Files
-- **Shared Repository:** Centralized file browser with folder categories (Design, Documents, Code, Media).
-- **File Upload & Categorization:** Drag-and-drop file upload modal with automatic type detection and size tracking.
-- **Direct Downloads:** Quick-download links for workspace assets.
-- **Shareable Links:** Instant one-click link copying to share files with team members.
+### Reviews (RFC & Code Inspection)
+- **Review Dashboard:** Centralized tracking for architectural RFCs, code pull requests, and design specifications.
+- **Reviewer Status:** Clear status tags (`Approved`, `Changes Requested`, `Under Review`) with linked pull request numbers and benchmark references.
+- **Empty State Support:** Confirmed proper empty screen rendering when no active reviews exist in the database.
 
-### Reviews
-- **Lead Review Queue:** Team Leads have a dedicated view showing all tasks submitted for review by their pod members.
-- **Action Workflow:** Leads can *Approve*, *Request Changes*, or *Reject* tasks, updating task statuses and notifying assignees.
-- **Administrator Review Overview:** Administrators can inspect review activity across all pods in the organization with filterable lead and status criteria.
+### Projects & Milestones
+- **Portfolio Overview:** High-level project tracking cards showing project health (`On Track`, `At Risk`, `Delayed`).
+- **Progress Tracking:** Dynamic percentage completion bars, target delivery dates, and assigned pod contributors.
 
-### Projects
-- **Scoped Project Creation:** Create dedicated projects linked to specific pods with auto-provisioned project channels (`#project-*`) and task boards.
-- **Project-Level Filtering:** Filter tasks, channels, and Q&A entries by specific project names.
-- **Progress Tracking:** Dashboard project cards display real-time completion percentages computed directly from completed vs. open tasks.
-
-### AI Assistant
-- **Redesigned Modern Experience:** Clean context header with connection telemetry, starter suggestion cards, and dedicated prompt centerpiece.
-- **Live Workspace Grounding:** The assistant queries live Supabase tables (tasks, members, projects, channels) to answer contextual questions instead of hallucinating mock data.
-- **Multi-Tier Model Resilience:** Automatic fallback pipeline: Primary Gemini (`gemini-2.5-flash`) → Secondary Gemini (`gemini-2.0-flash`) → Groq (`openai/gpt-oss-120b` / `llama-3.3-70b`) ensuring uptime if primary rate limits occur.
-- **Rich Markdown & Code Rendering:** Formatted response headers, syntax-highlighted code blocks with one-click copy, and referenced knowledge sources.
-- **"Document Our Teamwork":** Quick action synthesizes team progress into a structured markdown report, allows user editing, and saves the result directly into the Files repository.
+### AI Assistant Co-Pilot
+- **Full View & Slide-Out Drawer:** Two interactive modes — a dedicated full-page AI Assistant tab and a slide-out drawer accessible from any view via the global header.
+- **Live Database Context Injection:** Automatically aggregates active sprint tasks, recent channel discussions, and open Q&A threads directly into the prompt context.
+- **Markdown & Code Rendering:** Syntax-highlighted responses, bullet-point formatting, copy-to-clipboard buttons, and prompt regeneration.
+- **Multi-Tier Provider Chain:** Resilient fallback engine traversing OpenAI → Gemini Primary → Gemini Fallback → Groq → Contextual simulated fallback.
 
 ### Profile & Settings
-- **Profile Customization:** Edit display name, phone, bio, technical skills, and social links with persistent storage.
-- **Avatar Management:** Upload profile photos, adjust crop alignment, and remove avatars to return to initials using Supabase Storage.
-- **Clean Field Schema:** Deprecated portfolio fields have been removed.
-- **Password Updates:** In-app password change form with validation and confirmation notices.
-- **Theme Switcher:** Instantly switch between *Calm Light*, *Midnight (Dark)*, and *System Match* (dynamically adapts to OS color scheme) with localStorage persistence.
+- **User Profile Management:** View personal account details, assigned pod codes, and organization roles.
+- **Interactive Avatar Cropping:** Built-in modal for uploading, panning, and cropping profile photos.
+- **Theme Switching:** System-wide dark mode and high-contrast light mode toggle with local storage persistence.
 
-### Administration & Navigation
-- **Collapsible Sidebar:** Header toggle smoothly collapses the navigation sidebar to an icon-only mode with tooltips, saving state between sessions.
-- **Native Responsive Layout:** Fully responsive layout across mobile and desktop viewports without relying on simulated device wrappers.
-- **User Management & CSV Export:** Administrators can view the workspace roster, inspect join requests, approve/decline membership, and export user lists to CSV.
+### Admin Console
+- **User Directory:** Administrator-only management table showing all registered organization members.
+- **Access Moderation:** Approve pending account join requests and assign organizational team functions.
 
 ---
 
 ## 3. Needs Further Work
 
-The following items are partially functioning, have known caveats, or require follow-up development before a high-concurrency production rollout:
+Features that are functional but require refinement, edge-case handling, or bug fixes:
 
-| Area | Feature | Current State | What's Needed |
-|---|---|---|---|
-| **Database Schema Sync** | Live Schema Baseline Alignment | The live Supabase instance was created prior to recent schema additions; columns such as `channels.deleted_at`, `channels.is_protected`, and `tasks.project_id` exist in [`supabase_schema.sql`](file:///r:/Projects/TeamHUB/supabase_schema.sql) but need to be applied to the remote database via [`000_schema_sync.sql`](file:///r:/Projects/TeamHUB/000_schema_sync.sql). | Run [`000_schema_sync.sql`](file:///r:/Projects/TeamHUB/000_schema_sync.sql) in the Supabase SQL Editor to bring the live database up to baseline parity without dropping existing tables. |
-| **Relational Foreign Keys** | Channels & Tasks Foreign Keys | `channels.id` currently uses text slugs (e.g. `'general'`) instead of UUIDs, preventing strict foreign key constraints from `channel_messages(channel_id)` and `tasks(project_id)`. | Execute migration `001_channels_uuid_migration.sql` to adopt UUID primary keys for channels and enforce relational foreign keys across messages and tasks. |
-| **Files & Storage** | Direct Cloud Storage Buckets | Avatar uploads store binary images in Supabase Storage (`avatars` bucket). General workspace file uploads fall back to generated data links if the `workspace-files` bucket has not been provisioned. | Ensure the `workspace-files` and `task-attachments` storage buckets exist with public read policies in the Supabase Dashboard. |
-| **Notifications** | Persistent Database Notifications | The notification bell displays unread badges and action indicators, but notifications are stored in client memory. | Persist notifications to a dedicated `public.notifications` table in PostgreSQL so alerts sync across devices and survive session clearings. |
+1. **AI Upstream Free-Tier Stability:**
+   - *What works:* The client successfully chains requests through OpenAI, Gemini, and Groq, falling back to simulated responses if all fail.
+   - *What doesn't:* Free-tier Gemini keys experience severe `503 Service Unavailable / High Demand` throttling during peak usage periods, and OpenAI accounts without paid credits return `429`. Paid tier API accounts are required for uninterrupted operation.
+2. **Channel Slug vs. UUID Alignment:**
+   - *What works:* Channel listings and message feeds query live database tables.
+   - *What doesn't:* Certain contextual lookups (e.g. `src/lib/gemini.ts` lines 40 & 61) query messages using the text slug `'design'`. A complete database migration to UUID-based channel keys is required across all components.
+3. **Client-Side Secret Exposure:**
+   - *What works:* Direct client-side `fetch()` calls enable instant local testing without needing a standalone backend.
+   - *What doesn't:* API keys (`VITE_OPENAI_API_KEY`, `VITE_GEMINI_API_KEY`, `VITE_GROQ_API_KEY`) are bundled into the browser JavaScript. For production, these must run inside a Supabase Edge Function or secure API gateway.
+4. **Initial State Hydration Flash:**
+   - *What works:* Components load real database data on mount.
+   - *What doesn't:* `App.tsx` initializes state collections with static mock constants before asynchronous database queries resolve, occasionally producing a brief momentary flash of placeholder content before live data arrives.
 
 ---
 
 ## 4. Not Yet Implemented / Planned for Future
 
-The following features were discussed during product ideation or deferred for post-launch releases:
+Features discussed or indicated in UI layouts that have not yet been built:
 
-1. **Direct 1-on-1 Messaging (DMs):** Private direct messaging between individual team members outside of public channels.
-2. **Audio/Video Huddles:** Native WebRTC video/voice calls or embedded Google Meet / Zoom link integrations within channels.
-3. **Live User Presence / Typing Indicators:** Green "online/away" status badges on avatars and "Sarah is typing..." indicators in chat channels.
-4. **Interactive Markdown Split-Pane Preview:** While markdown formatting tokens insert cleanly into chat and comments, a live side-by-side preview panel has not been added.
-5. **@User Mentions with Autocomplete Dropdown:** Typing `@` in chat currently inputs literal text without displaying an interactive floating teammate selector.
-6. **Third-Party Integrations:** Automated webhook integrations for GitHub pull request alerts, Figma design comments, or Jira issue syncing.
-7. **Daily Standup Summary Bot:** An automated cron or AI background workflow that polls active tasks at 9:00 AM each morning and posts a digest into `#general`.
+- **Rich Text / Formatting Toolbar Auto-Insert:** The chat and AI input bars show standard input controls; visual formatting buttons (bold, italic, code block auto-insertion) are not yet wired to insert markdown tags automatically into the text caret position.
+- **Voice Prompt Dictation:** The microphone icon in the AI Drawer and chat inputs is a visual UI element; browser Web Speech API voice-to-text dictation has not yet been integrated.
+- **Attachment & Code File Dropzone:** File attachment buttons in chat inputs are placeholders; direct multi-part binary file uploads to Supabase Storage buckets from the chat bar are deferred.
+- **Document Export:** Exporting generated AI documentation drafts directly to external services (e.g. Notion, Confluence, or raw PDF/Markdown download) has not yet been built.
+- **Global Command Palette Indexing:** `Cmd+K` opens the navigation modal with standard shortcuts, but deep full-text indexing across historical channel transcripts and closed tickets is not yet implemented.
 
 ---
 
 ## 5. Known Technical Debt
 
-1. **AI Rate Limiting on Free Tier:**
-   - The application relies on free-tier API keys for Google Gemini and Groq. Under heavy concurrent testing or large team usage, Google AI Studio may return HTTP 429 (Rate Limit Exceeded). While the fallback chain successfully reroutes requests to backup models, high-volume production requires upgraded pay-as-you-go API keys.
-2. **Manual SQL Schema Execution:**
-   - Database migrations are consolidated into raw SQL scripts (`supabase_schema.sql`, `000_schema_sync.sql`, `001_channels_uuid_migration.sql`). Setting up a new environment requires manually running these scripts in the Supabase SQL Editor rather than using an automated CLI migration pipeline (e.g., Supabase CLI / Prisma / Flyway).
-3. **Dual Client Fallback State:**
-   - To facilitate local development and UI previewing when offline or without active Supabase credentials, several modules in `src/lib/supabase.ts` fall back to `mockData.ts` or `localStorage`. These should be gated behind an explicit `VITE_DEMO_MODE=true` flag so production builds fail cleanly on database errors rather than falling back to mock fixtures.
-4. **Database RLS Policies Maintenance:**
-   - The SQL schema contains several RLS helper functions (e.g., `current_user_role()`, `current_user_workspace_id()`, `is_valid_task_assignment()`). When adding new tables or expanding role logic, developers must remember to update both front-end route guards and corresponding PostgreSQL policies.
+1. **Manual SQL Migration Scripts:**
+   - Database schema migrations (`000_schema_sync.sql`, `001_channels_uuid_migration.sql`, etc.) are written as standalone SQL scripts in the repository root and must be manually pasted into the Supabase SQL editor rather than automated via a Supabase CLI migration pipeline.
+2. **Hardcoded Context Lookups:**
+   - `src/lib/gemini.ts` contains hardcoded references to the `#design` channel slug when compiling background workspace context.
+3. **NPM Peer Dependency Conflict:**
+   - Running `npm install` requires the `--legacy-peer-deps` flag due to an upstream peer dependency mismatch between `@tailwindcss/vite` and `esbuild@0.25`.
+4. **Dual Git Repository Metadata:**
+   - An untracked `TeamHub/` subfolder exists at the project root containing legacy `.git` metadata from an earlier local clone, which should be safely purged to avoid confusion.
 
 ---
 
 ## 6. Requirements to Go Live
 
-Before TeamHub can be deployed for a real organization or active team, complete the following deployment checklist:
+To transition TeamHub from local development to a live production deployment accessible to a real team:
 
-### Step 1: Supabase Cloud Project Setup
-1. Create a new project at [supabase.com](https://supabase.com).
-2. Open the **SQL Editor** in the Supabase dashboard.
-3. Execute [000_schema_sync.sql](file:///r:/Projects/TeamHUB/000_schema_sync.sql) (or [supabase_schema.sql](file:///r:/Projects/TeamHUB/supabase_schema.sql)) to create all baseline tables, indexes, triggers, and Row-Level Security policies.
-4. Navigate to **Storage** in the Supabase dashboard and create three storage buckets:
-   - `avatars` (Public bucket: enabled)
-   - `task-attachments` (Public bucket: enabled)
-   - `workspace-files` (Public bucket: enabled)
-5. Navigate to **Authentication → Providers → Email**:
-   - In development, *Confirm Email* was disabled to allow instant test account creation.
-   - For production, decide whether to **Enable Email Confirmations** and connect a custom SMTP provider (e.g., SendGrid, Resend, or AWS SES) to avoid Supabase's default rate limit of 3 emails per hour.
-6. Under **Authentication → URL Configuration**, add your production domain to *Site URL* and *Redirect URLs*.
+### Environment Variables
+Configure the following in your hosting provider's environment settings:
+- `VITE_SUPABASE_URL`: Active production Supabase project URL (`https://<project-id>.supabase.co`).
+- `VITE_SUPABASE_ANON_KEY`: Supabase anon/public API key.
+- `VITE_OPENAI_API_KEY`: Production OpenAI API key (with active billing credits).
+- `VITE_GEMINI_API_KEY`: Google AI Studio API key with paid quota to prevent 503 drops.
+- `VITE_GROQ_API_KEY`: Groq Cloud API key for high-speed fallback completion.
+- `APP_URL`: Production domain URL (e.g. `https://teamhub.company.internal`).
 
-### Step 2: External AI API Keys
-1. **Google AI Studio:**
-   - Generate an API key from [aistudio.google.com](https://aistudio.google.com).
-   - Ensure the key has quota for `gemini-2.5-flash` or `gemini-2.0-flash`.
-2. **Groq Console:**
-   - Generate a free backup API key from [console.groq.com](https://console.groq.com).
-   - Ensure access to models such as `llama-3.3-70b-versatile` or `openai/gpt-oss-120b`.
+### Supabase Project Configuration
+1. **Schema Initialization:**
+   - Execute `supabase_schema.sql` in the Supabase SQL Editor.
+   - Run `000_schema_sync.sql` and `001_channels_uuid_migration.sql` to apply primary foreign keys and UUID schemas.
+2. **Auth Settings:**
+   - Re-enable **Confirm email** under *Authentication → Providers → Email* (disabled during local dev).
+   - Configure **Site URL** and **Redirect URLs** to point to your live deployment domain.
+   - Enable rate-limiting on authentication endpoints to prevent credential stuffing.
+3. **Storage Buckets:**
+   - Verify that the `avatars` and `workspace-files` storage buckets are created and marked as public with appropriate authenticated user write policies.
+4. **Security / RLS Auditing:**
+   - Confirm that Row-Level Security (RLS) is enabled on all tables (`tasks`, `channels`, `channel_messages`, `questions`, `workspace_files`, `reviews`, `projects`).
 
-### Step 3: Production Environment Variables
-Configure the following secrets in your deployment hosting provider (e.g., Vercel, Netlify, Cloudflare Pages):
-
-```bash
-# Supabase Backend Configuration
-VITE_SUPABASE_URL="https://YOUR_PROJECT_ID.supabase.co"
-VITE_SUPABASE_ANON_KEY="YOUR_SUPABASE_ANON_KEY"
-
-# Primary & Secondary AI Assistant Keys
-VITE_GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
-GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
-VITE_GROQ_API_KEY="YOUR_GROQ_API_KEY"
-GROQ_API_KEY="YOUR_GROQ_API_KEY"
-
-# Optional Model Overrides (defaults to stable versions if omitted)
-VITE_GEMINI_PRIMARY_MODEL="gemini-2.5-flash"
-VITE_GEMINI_FALLBACK_MODEL="gemini-2.0-flash"
-VITE_GROQ_MODEL="openai/gpt-oss-120b"
-
-# Public App Hosting URL
-APP_URL="https://your-teamhub-domain.com"
-```
-
-### Step 4: Build & Deployment Commands
-- **Framework Preset:** Vite / React
-- **Install Command:** `npm install`
-- **Build Command:** `npm run build`
-- **Output Directory:** `dist`
-- **Single-Page Application (SPA) Routing:** Ensure rewrite rules redirect all paths to `/index.html` (e.g., a `vercel.json` rewrite or `_redirects` file for Netlify).
+### Production Build & Hosting
+1. Build the client bundle:
+   ```bash
+   npm run build
+   ```
+2. Verify production assets compile cleanly into the `dist/` directory.
+3. Deploy static assets to a production edge host (e.g. Vercel, Netlify, Cloudflare Pages, or an AWS S3/CloudFront bucket) configured with single-page application (SPA) routing redirects (`/* -> /index.html`).
