@@ -329,8 +329,8 @@ export const AiDrawer: React.FC<AiDrawerProps> = ({
                               Recommended Next Step
                             </span>
                             <p>
-                              Deploy test plan targeting Redis cluster multi-region failover under synthetic{' '}
-                              <strong>250ms NTP jitter</strong> with 50k sustained writes/sec.
+                              Deploy test plan targeting cluster failover under synthetic{' '}
+                              <strong>250ms latency jitter</strong> with sustained writes.
                             </p>
                           </div>
 
@@ -342,7 +342,7 @@ export const AiDrawer: React.FC<AiDrawerProps> = ({
                             <div className="flex flex-wrap gap-1.5">
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#ffffff] text-[#131b2e] text-[11px] shadow-2xs border border-[#eaedff]">
                                 <span className="material-symbols-outlined text-[13px] text-[#006b2c]">description</span>
-                                <span>redis-sliding-window-spec.pdf</span>
+                                <span>architecture-spec.pdf</span>
                               </span>
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#ffffff] text-[#131b2e] text-[11px] shadow-2xs border border-[#eaedff]">
                                 <span className="material-symbols-outlined text-[13px] text-[#0051d5]">merge</span>
@@ -429,7 +429,7 @@ export const AiDrawer: React.FC<AiDrawerProps> = ({
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#eaedff] text-[#3e4a3d] text-[11px] font-medium truncate max-w-[340px]">
               <span className="material-symbols-outlined text-[14px] text-[#006b2c]">target</span>
               <span className="truncate">
-                Active context: <strong>Redis sliding-window TTL (Q-1049)</strong>
+                Active context: <strong>Sprint Architecture & Codebase</strong>
               </span>
             </div>
             <span className="text-[11px] text-[#006b2c] hover:underline cursor-pointer">Live Pod Sync</span>

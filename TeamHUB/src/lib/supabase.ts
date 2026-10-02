@@ -1474,12 +1474,7 @@ export function getLocalMessagesByChannel(): Record<string, ChannelMessage[]> {
     console.warn('Failed to parse local messages by channel:', err);
   }
 
-  // Initialize isolated seeds by channel
-  const initialMap: Record<string, ChannelMessage[]> = {
-    general: INITIAL_CHANNEL_MESSAGES.filter((m) => (m.channelId || m.channel_id) === 'general'),
-    design: INITIAL_CHANNEL_MESSAGES.filter((m) => (m.channelId || m.channel_id) === 'design'),
-  };
-  return initialMap;
+  return {};
 }
 
 /**
@@ -1545,8 +1540,12 @@ export async function fetchMessagesFromDb(channelId: string): Promise<ChannelMes
       .eq('channel_id', targetChannelUuid)
       .order('created_at', { ascending: true });
 
-    if (error || !data || data.length === 0) {
+    if (error || !data) {
       return localMessages;
+    }
+
+    if (data.length === 0) {
+      return [];
     }
 
     const dbMapped: ChannelMessage[] = data.map((m: any): ChannelMessage => ({
@@ -1769,27 +1768,113 @@ export async function fetchQuestionsFromDb(): Promise<Question[] | null> {
 export async function createQuestionInDb(question: Question, actingUser: User): Promise<{ success: boolean; question?: Question; error?: string }> {
   if (supabase) {
     try {
+      let authorId = actingUser.id;
+      const isAuthorUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(authorId);
+      if (!isAuthorUuid) {
+        const { data: authData } = await supabase.auth.getUser();
+        if (authData?.user?.id) {
+          authorId = authData.user.id;
+        } else {
+          const { data: firstProf } = await supabase.from('profiles').select('id').limit(1).maybeSingle();
+          if (firstProf?.id) authorId = firstProf.id;
+        }
+      }
+
       const { data, error } = await supabase
         .from('questions')
         .insert({
           key: question.key,
           title: question.title,
           content: question.content,
-          author_id: actingUser.id,
+          author_id: authorId,
           tags: question.tags,
           channel: question.channel,
           status: 'open',
+          code_snippet: question.codeSnippet || null,
         })
         .select('*')
         .single();
 
-      if (error) return { success: false, error: error.message };
-      if (data) return { success: true, question: { ...question, id: data.id } };
+      if (error) {
+        console.warn('Supabase createQuestionInDb error:', error.message);
+        return { success: false, error: error.message };
+      }
+      if (data) {
+        return {
+          success: true,
+          question: {
+            ...question,
+            id: data.id,
+            author: actingUser,
+            createdAt: 'Just now',
+            answers: [],
+          },
+        };
+      }
     } catch (err: any) {
+      console.warn('Supabase createQuestionInDb exception:', err);
       return { success: false, error: err.message };
     }
   }
   return { success: true, question };
+}
+
+export async function createAnswerInDb(
+  questionId: string,
+  answer: QuestionAnswer,
+  actingUser: User
+): Promise<{ success: boolean; answer?: QuestionAnswer; error?: string }> {
+  if (supabase) {
+    try {
+      let authorId = actingUser.id;
+      const isAuthorUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(authorId);
+      if (!isAuthorUuid) {
+        const { data: authData } = await supabase.auth.getUser();
+        if (authData?.user?.id) {
+          authorId = authData.user.id;
+        } else {
+          const { data: firstProf } = await supabase.from('profiles').select('id').limit(1).maybeSingle();
+          if (firstProf?.id) authorId = firstProf.id;
+        }
+      }
+
+      const { data, error } = await supabase
+        .from('question_answers')
+        .insert({
+          question_id: questionId,
+          author_id: authorId,
+          content: answer.content,
+          code_block: answer.codeBlock || null,
+          tip_box: answer.tipBox || null,
+          upvotes: answer.upvotes || 1,
+          is_accepted: answer.isAccepted || false,
+          is_ai_suggested: answer.isAiSuggested || false,
+        })
+        .select('*')
+        .single();
+
+      if (error) {
+        console.warn('Supabase createAnswerInDb error:', error.message);
+        return { success: false, error: error.message };
+      }
+
+      if (data) {
+        return {
+          success: true,
+          answer: {
+            ...answer,
+            id: data.id,
+            author: actingUser,
+            createdAt: 'Just now',
+          },
+        };
+      }
+    } catch (err: any) {
+      console.warn('Supabase createAnswerInDb exception:', err);
+      return { success: false, error: err.message };
+    }
+  }
+  return { success: true, answer };
 }
 
 
@@ -1951,7 +2036,7 @@ export async function fetchReviewsFromDb(actingUser: User): Promise<Review[]> {
       }
 
       const { data, error } = await query;
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         return data.map((r: any): Review => ({
           id: r.id,
           workspaceId: r.workspace_id,
@@ -2180,7 +2265,7 @@ export function getLocalProjects(): Project[] {
   } catch (err) {
     console.warn('Failed to parse local projects:', err);
   }
-  return [...INITIAL_PROJECTS];
+  return [];
 }
 
 /**
@@ -2213,7 +2298,7 @@ export function getLocalChannels(): Channel[] {
   } catch (err) {
     console.warn('Failed to parse local channels:', err);
   }
-  return [...CHANNELS.filter((c: any) => !c.deletedAt && !c.deleted_at)];
+  return [];
 }
 
 /**
@@ -2506,7 +2591,12 @@ export async function fetchProjectsFromDb(actingUser?: User): Promise<Project[]>
       return localProjects;
     }
 
-    if (data && data.length > 0) {
+    if (data) {
+      if (data.length === 0) {
+        saveLocalProjects([]);
+        return [];
+      }
+
       const dbProjects: Project[] = data.map((row: any) => ({
         id: row.id,
         name: row.name,
@@ -2523,18 +2613,13 @@ export async function fetchProjectsFromDb(actingUser?: User): Promise<Project[]>
         workspaceId: row.workspace_id,
       }));
 
-      // Merge with initial projects if any missing
-      const mergedMap = new Map<string, Project>();
-      localProjects.forEach((p) => mergedMap.set(p.id, p));
-      dbProjects.forEach((p) => mergedMap.set(p.id, p));
-      const combined = Array.from(mergedMap.values());
-      saveLocalProjects(combined);
+      saveLocalProjects(dbProjects);
 
       if (!actingUser || actingUser.role === 'admin') {
-        return combined;
+        return dbProjects;
       }
 
-      return combined.filter((p) => {
+      return dbProjects.filter((p) => {
         const userPod = (actingUser.pod || '').toLowerCase();
         const userPodCode = (actingUser.podCode || '').toLowerCase();
         const projPod = (p.pod || '').toLowerCase();
@@ -2732,7 +2817,7 @@ export function getLocalFiles(): WorkspaceFile[] {
   } catch (err) {
     console.warn('Failed to parse local files:', err);
   }
-  return [...WORKSPACE_FILES];
+  return [];
 }
 
 /**
@@ -2743,6 +2828,112 @@ export function saveLocalFiles(files: WorkspaceFile[]): void {
     localStorage.setItem(FILES_STORAGE_KEY, JSON.stringify(files));
   } catch (err) {
     console.warn('Failed to save local files:', err);
+  }
+}
+
+function buildUserFromProfile(p: any): User {
+  if (!p) {
+    return {
+      id: 'anon',
+      name: 'Teammate',
+      email: '',
+      role: 'member',
+      roleTitle: 'Member',
+      department: 'Engineering',
+      pod: 'Core Pod',
+      initials: 'TM',
+      status: 'online',
+      location: 'Remote',
+      timezone: 'UTC',
+      skills: [],
+      tasksCompleted: 0,
+      questionsAnswered: 0,
+      lastActive: 'Just now',
+    };
+  }
+  return {
+    id: p.id || 'anon',
+    name: p.full_name || p.email || 'Teammate',
+    email: p.email || '',
+    role: p.role || 'member',
+    roleTitle: p.role_title || 'Member',
+    department: p.department || 'Engineering',
+    pod: p.pod || 'Core Pod',
+    initials: (p.full_name || p.email || 'TU').slice(0, 2).toUpperCase(),
+    status: 'online',
+    location: p.location || 'Remote',
+    timezone: p.timezone || 'UTC',
+    skills: Array.isArray(p.skills) ? p.skills : [],
+    tasksCompleted: p.tasks_completed || 0,
+    questionsAnswered: p.questions_answered || 0,
+    lastActive: p.last_active || 'Just now',
+  };
+}
+
+/**
+ * Fetches workspace files from Supabase "workspace_files" table with fallback to local store.
+ */
+export async function fetchWorkspaceFilesFromDb(): Promise<WorkspaceFile[] | null> {
+  if (!supabase) return getLocalFiles();
+  try {
+    const { data, error } = await supabase
+      .from('workspace_files')
+      .select('*, uploader:profiles!uploader_id(*)')
+      .order('created_at', { ascending: false });
+
+    if (error || !data) {
+      console.warn('Supabase fetch workspace_files error:', error?.message);
+      return getLocalFiles();
+    }
+
+    return data.map((f: any): WorkspaceFile => ({
+      id: f.id,
+      name: f.name,
+      type: f.type,
+      size: f.size,
+      folder: f.folder || 'Sprint Deliverables',
+      uploader: buildUserFromProfile(f.uploader),
+      previewUrl: f.preview_url || undefined,
+      url: f.url || undefined,
+      tags: Array.isArray(f.tags) ? f.tags : [],
+      aiSummary: f.ai_summary || undefined,
+      linkedTask: f.linked_task || undefined,
+      dimensions: f.dimensions || undefined,
+      uploadedAt: f.created_at ? new Date(f.created_at).toLocaleDateString() : 'Recent',
+    }));
+  } catch (err) {
+    console.warn('Failed to query Supabase workspace_files table:', err);
+    return getLocalFiles();
+  }
+}
+
+/**
+ * Fetches daily standup entries from Supabase "standups" table or local store
+ */
+export async function fetchStandupsFromDb(): Promise<StandupEntry[] | null> {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('standups')
+      .select('*, user:profiles!user_id(*)')
+      .order('created_at', { ascending: false });
+
+    if (error || !data) {
+      return [];
+    }
+
+    return data.map((s: any): StandupEntry => ({
+      id: s.id,
+      user: buildUserFromProfile(s.user),
+      postedAt: s.created_at ? new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Today',
+      done: s.done || '',
+      doing: s.doing || '',
+      blocked: s.blocked || 'None',
+      status: s.blocked && s.blocked !== 'None' ? 'blocked' : 'on_track',
+    }));
+  } catch (err) {
+    console.warn('Supabase fetch standups error:', err);
+    return [];
   }
 }
 
@@ -2853,5 +3044,24 @@ export async function fetchRealTeamworkContext(): Promise<{
       questionsCount: resolvedQuestions.length,
     },
   };
+}
+
+/**
+ * Fetches the count of active profiles from Supabase profiles table
+ */
+export async function fetchProfilesCountFromDb(): Promise<number> {
+  if (!supabase) return 0;
+  try {
+    const { count, error } = await supabase
+      .from('profiles')
+      .select('*', { count: 'exact', head: true });
+    if (!error && typeof count === 'number') {
+      return count;
+    }
+    const { data } = await supabase.from('profiles').select('id');
+    return data ? data.length : 0;
+  } catch (err) {
+    return 0;
+  }
 }
 

@@ -14,7 +14,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
   onNavigate,
   onTaskUpdated,
 }) => {
-  const [reviews, setReviews] = useState<Review[]>(INITIAL_REVIEWS);
+  const [reviews, setReviews] = useState<Review[]>([]);
   const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'changes'>('pending');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest');
@@ -43,7 +43,7 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
     async function loadReviews() {
       try {
         const data = await fetchReviewsFromDb(currentUser);
-        if (isMounted && data && data.length > 0) {
+        if (isMounted && data) {
           setReviews(data);
         }
       } catch (e) {
@@ -241,6 +241,30 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
 
   const isAdmin = currentUser.role === 'admin';
 
+  // Computed dynamic stats for Admin Overview & Team Lead Ribbons
+  const totalDeliverables = reviews.length;
+  const approvedCount = reviews.filter((r) => r.status === 'approved').length;
+  const pendingCount = reviews.filter((r) => r.status === 'pending').length;
+  const changesCount = reviews.filter((r) => r.status === 'changes_requested').length;
+
+  const reviewsWithTurnaround = reviews.filter((r) => typeof r.turnaroundHours === 'number');
+  const avgTurnaroundVal =
+    reviewsWithTurnaround.length > 0
+      ? (
+          reviewsWithTurnaround.reduce((acc, r) => acc + (r.turnaroundHours || 0), 0) /
+          reviewsWithTurnaround.length
+        ).toFixed(1)
+      : null;
+  const avgTurnaroundStr = avgTurnaroundVal ? `${avgTurnaroundVal} hrs` : (totalDeliverables === 0 ? '0 hrs' : 'N/A');
+
+  const activeReviewerNames = Array.from(
+    new Set(reviews.map((r) => r.reviewer?.name || r.reviewerName).filter(Boolean) as string[])
+  );
+  const leadsCount = activeReviewerNames.length;
+
+  const metSlaCount = reviews.filter((r) => (r.turnaroundHours ?? 0) <= 24).length;
+  const slaPercentage = totalDeliverables > 0 ? ((metSlaCount / totalDeliverables) * 100).toFixed(1) + '%' : '100%';
+
   return (
     <div className="flex flex-col w-full relative min-h-screen text-[#131b2e] animate-in fade-in duration-200">
       {/* ========================================================================= */}
@@ -290,20 +314,20 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                 </div>
               </div>
               <div className="flex items-baseline gap-2 mb-2">
-                <span className="text-2xl font-bold text-[#131b2e]">48</span>
+                <span className="text-2xl font-bold text-[#131b2e]">{totalDeliverables}</span>
                 <span className="text-[11px] text-[#6e7b6c]">this sprint</span>
               </div>
               <div className="flex items-center gap-2 pt-2 bg-[#f2f3ff]/60 px-2 py-1.5 rounded-lg text-[11px] text-[#6e7b6c]">
                 <span className="flex items-center gap-1 text-[#006b2c] font-semibold">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#006b2c]"></span>32 Approved
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#006b2c]"></span>{approvedCount} Approved
                 </span>
                 <span>•</span>
                 <span className="flex items-center gap-1 text-[#b15f00] font-semibold">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#b15f00]"></span>9 Pending
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#b15f00]"></span>{pendingCount} Pending
                 </span>
                 <span>•</span>
                 <span className="flex items-center gap-1 text-[#ba1a1a]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#ba1a1a]"></span>7 Changes
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#ba1a1a]"></span>{changesCount} Changes
                 </span>
               </div>
             </div>
@@ -317,12 +341,14 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                 </div>
               </div>
               <div className="flex items-baseline gap-2 mb-2">
-                <span className="text-2xl font-bold text-[#131b2e]">3.8 hrs</span>
-                <span className="text-[11px] text-[#006b2c] font-semibold">36% below target</span>
+                <span className="text-2xl font-bold text-[#131b2e]">{avgTurnaroundStr}</span>
+                <span className="text-[11px] text-[#006b2c] font-semibold">
+                  {totalDeliverables === 0 ? 'No reviews recorded' : 'Target < 6h'}
+                </span>
               </div>
               <div className="flex items-center justify-between pt-1">
                 <div className="w-full bg-[#eaedff] rounded-full h-1.5 overflow-hidden">
-                  <div className="bg-[#006b2c] h-1.5 rounded-full" style={{ width: '63%' }}></div>
+                  <div className="bg-[#006b2c] h-1.5 rounded-full" style={{ width: totalDeliverables === 0 ? '0%' : '63%' }}></div>
                 </div>
                 <span className="text-[11px] text-[#6e7b6c] ml-2 whitespace-nowrap">Target &lt; 6h</span>
               </div>
@@ -337,17 +363,21 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                 </div>
               </div>
               <div className="flex items-baseline gap-2 mb-2">
-                <span className="text-2xl font-bold text-[#131b2e]">6 Leads</span>
-                <span className="text-[11px] text-[#6e7b6c]">across 4 pods</span>
+                <span className="text-2xl font-bold text-[#131b2e]">{leadsCount} Lead{leadsCount === 1 ? '' : 's'}</span>
+                <span className="text-[11px] text-[#6e7b6c]">{leadsCount > 0 ? 'assigned' : 'in workspace'}</span>
               </div>
               <div className="flex items-center gap-1.5 pt-1">
-                <div className="flex -space-x-1.5 overflow-hidden">
-                  <div className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#dbe1ff] text-[#00174b] text-[10px] font-bold ring-2 ring-white">TB</div>
-                  <div className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#ffdcc3] text-[#2f1500] text-[10px] font-bold ring-2 ring-white">MC</div>
-                  <div className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#7ffc97] text-[#002109] text-[10px] font-bold ring-2 ring-white">SL</div>
-                  <div className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#dae2fd] text-[#3e4a3d] text-[10px] font-bold ring-2 ring-white">PS</div>
-                </div>
-                <span className="text-[11px] text-[#6e7b6c] ml-1">Balanced load (~8 ea)</span>
+                {leadsCount > 0 ? (
+                  <div className="flex -space-x-1.5 overflow-hidden">
+                    {activeReviewerNames.slice(0, 4).map((name, i) => (
+                      <div key={i} className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#dbe1ff] text-[#00174b] text-[10px] font-bold ring-2 ring-white">
+                        {name.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-[11px] text-[#6e7b6c]">No active reviewer assignments</span>
+                )}
               </div>
             </div>
 
@@ -360,12 +390,12 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                 </div>
               </div>
               <div className="flex items-baseline gap-2 mb-2">
-                <span className="text-2xl font-bold text-[#006b2c]">96.4%</span>
-                <span className="text-[11px] text-[#6e7b6c]">46 of 48 met</span>
+                <span className="text-2xl font-bold text-[#006b2c]">{slaPercentage}</span>
+                <span className="text-[11px] text-[#6e7b6c]">{metSlaCount} of {totalDeliverables} met</span>
               </div>
               <div className="flex items-center justify-between text-[#6e7b6c] text-[11px] pt-1">
-                <span className="text-[#006b2c] font-medium">0 Breached</span>
-                <span>2 Grace Period</span>
+                <span className="text-[#006b2c] font-medium">{reviews.filter((r) => (r.turnaroundHours ?? 0) > 24).length} Breached</span>
+                <span>{pendingCount} Pending Gate</span>
               </div>
             </div>
           </div>
@@ -633,8 +663,14 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                 <span className="material-symbols-outlined text-[18px]">security_update_good</span>
               </div>
               <div className="flex flex-col">
-                <span className="text-xs font-semibold text-[#131b2e]">Zero Pending Security Gates</span>
-                <span className="text-xs text-[#3e4a3d] mt-0.5">All deliverables touching auth or encryption have assigned dual-reviewers.</span>
+                <span className="text-xs font-semibold text-[#131b2e]">
+                  {pendingCount === 0 ? 'Zero Pending Security Gates' : `${pendingCount} Pending Security Gate${pendingCount === 1 ? '' : 's'}`}
+                </span>
+                <span className="text-xs text-[#3e4a3d] mt-0.5">
+                  {totalDeliverables === 0
+                    ? 'No deliverables in pipeline. Dual-reviewer gates will activate on submission.'
+                    : `${approvedCount} approved, ${pendingCount} pending reviewer action.`}
+                </span>
               </div>
             </div>
             <div className="p-4 rounded-2xl bg-white border border-[#eaedff] shadow-xs flex items-start gap-3">
@@ -642,8 +678,12 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
                 <span className="material-symbols-outlined text-[18px]">speed</span>
               </div>
               <div className="flex flex-col">
-                <span className="text-xs font-semibold text-[#131b2e]">Fastest Pod Response</span>
-                <span className="text-xs text-[#3e4a3d] mt-0.5">Design Systems logged 1.2 hrs turnaround avg over last 7 working days.</span>
+                <span className="text-xs font-semibold text-[#131b2e]">Pod Turnaround Response</span>
+                <span className="text-xs text-[#3e4a3d] mt-0.5">
+                  {totalDeliverables === 0
+                    ? 'No reviews logged yet. Turnaround metrics compute automatically as reviews conclude.'
+                    : `Average turnaround is ${avgTurnaroundStr} with ${slaPercentage} SLA compliance.`}
+                </span>
               </div>
             </div>
             <div className="p-4 rounded-2xl bg-white border border-[#eaedff] shadow-xs flex items-start gap-3">
@@ -652,7 +692,11 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
               </div>
               <div className="flex flex-col">
                 <span className="text-xs font-semibold text-[#131b2e]">Immutable Audit Trail</span>
-                <span className="text-xs text-[#3e4a3d] mt-0.5">Governance events archived with SHA-256 commit signatures.</span>
+                <span className="text-xs text-[#3e4a3d] mt-0.5">
+                  {totalDeliverables === 0
+                    ? '0 review transactions recorded. Supabase audit ledger is live and verified.'
+                    : `${totalDeliverables} review transaction${totalDeliverables === 1 ? '' : 's'} cryptographically timestamped and synced.`}
+                </span>
               </div>
             </div>
           </div>
@@ -676,12 +720,14 @@ export const ReviewsView: React.FC<ReviewsViewProps> = ({
             <div className="flex items-center gap-4 bg-white border border-[#eaedff] px-4 py-1.5 rounded-full shadow-xs">
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-[#6e7b6c] uppercase tracking-wider font-semibold">Median Turnaround</span>
-                <span className="text-sm font-bold text-[#006b2c]">2.4h</span>
+                <span className="text-sm font-bold text-[#006b2c]">{avgTurnaroundVal ? `${avgTurnaroundVal}h` : '0h'}</span>
               </div>
               <div className="h-3 w-px bg-[#eaedff]"></div>
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-[#6e7b6c] uppercase tracking-wider font-semibold">Pass Rate</span>
-                <span className="text-sm font-bold text-[#131b2e]">94.2%</span>
+                <span className="text-sm font-bold text-[#131b2e]">
+                  {totalDeliverables > 0 ? ((approvedCount / totalDeliverables) * 100).toFixed(1) + '%' : '100%'}
+                </span>
               </div>
             </div>
           </div>

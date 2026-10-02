@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ViewMode, User, Task, ChannelMessage, Question, StandupEntry } from './types';
-import { USERS, INITIAL_TASKS, INITIAL_CHANNEL_MESSAGES, INITIAL_QUESTIONS, STANDUP_ENTRIES } from './data/mockData';
+import { USERS } from './data/mockData';
 import { getActiveAuthSession, signOutFromSupabaseAuth, AUTH_SESSION_STORAGE_KEY } from './lib/supabase';
 import { useTheme, THEME_STORAGE_KEY } from './context/ThemeContext';
 import { useSidebar } from './context/SidebarContext';
@@ -40,10 +40,10 @@ export default function App() {
   const [usersState, setUsersState] = useState<Record<string, User>>(USERS);
 
   // App-wide collections
-  const [tasksState, setTasksState] = useState<Task[]>(INITIAL_TASKS);
-  const [messagesState, setMessagesState] = useState<ChannelMessage[]>(INITIAL_CHANNEL_MESSAGES);
-  const [questionsState, setQuestionsState] = useState<Question[]>(INITIAL_QUESTIONS);
-  const [standupsState, setStandupsState] = useState<StandupEntry[]>(STANDUP_ENTRIES);
+  const [tasksState, setTasksState] = useState<Task[]>([]);
+  const [messagesState, setMessagesState] = useState<ChannelMessage[]>([]);
+  const [questionsState, setQuestionsState] = useState<Question[]>([]);
+  const [standupsState, setStandupsState] = useState<StandupEntry[]>([]);
 
   // Global Modals / Drawers
   const [showAiDrawer, setShowAiDrawer] = useState(false);

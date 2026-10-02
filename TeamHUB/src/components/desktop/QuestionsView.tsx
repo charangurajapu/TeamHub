@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Question, QuestionAnswer, User } from '../../types';
-import { INITIAL_QUESTIONS, USERS } from '../../data/mockData';
+import { fetchQuestionsFromDb, createQuestionInDb, createAnswerInDb, supabase } from '../../lib/supabase';
 
 interface QuestionsViewProps {
   currentUser: User;
@@ -13,10 +13,35 @@ export const QuestionsView: React.FC<QuestionsViewProps> = ({
   onOpenAiDrawer,
   selectedQuestionId,
 }) => {
-  const [questions, setQuestions] = useState<Question[]>(INITIAL_QUESTIONS);
-  const [activeQuestion, setActiveQuestion] = useState<Question | null>(
-    INITIAL_QUESTIONS.find((q) => q.id === selectedQuestionId) || null
-  );
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [activeQuestion, setActiveQuestion] = useState<Question | null>(null);
+
+  // Load questions from Supabase on mount
+  useEffect(() => {
+    let isMounted = true;
+    async function loadQuestions() {
+      try {
+        const data = await fetchQuestionsFromDb();
+        if (isMounted && data !== null) {
+          setQuestions(data);
+          if (data.length > 0) {
+            const initialActive = selectedQuestionId
+              ? data.find((q) => q.id === selectedQuestionId || q.key.toLowerCase() === selectedQuestionId.toLowerCase()) || data[0]
+              : data[0];
+            setActiveQuestion(initialActive);
+          } else {
+            setActiveQuestion(null);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load questions from DB:', err);
+      }
+    }
+    loadQuestions();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedQuestionId]);
 
   const [activeTab, setActiveTab] = useState<'open' | 'answered' | 'resolved' | 'my'>('open');
   const [selectedTopic, setSelectedTopic] = useState<string>('all');
@@ -90,15 +115,76 @@ export const QuestionsView: React.FC<QuestionsViewProps> = ({
     }
   };
 
-  const handlePostAnswer = (e: React.FormEvent) => {
+  // Realtime & Cross-tab QA Bus
+  useEffect(() => {
+    let supabaseSub: any = null;
+    if (supabase) {
+      try {
+        supabaseSub = supabase
+          .channel('realtime_qa_feed')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'questions' },
+            async () => {
+              const fresh = await fetchQuestionsFromDb();
+              if (fresh) setQuestions(fresh);
+            }
+          )
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'question_answers' },
+            async () => {
+              const fresh = await fetchQuestionsFromDb();
+              if (fresh) {
+                setQuestions(fresh);
+                if (activeQuestion) {
+                  const updatedActive = fresh.find((q) => q.id === activeQuestion.id);
+                  if (updatedActive) setActiveQuestion(updatedActive);
+                }
+              }
+            }
+          )
+          .subscribe();
+      } catch (e) {
+        console.warn('Realtime QA subscription error:', e);
+      }
+    }
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel('teamhub_qa_bus');
+      bc.onmessage = async (evt) => {
+        if (evt.data?.type === 'QA_MUTATED') {
+          const fresh = await fetchQuestionsFromDb();
+          if (fresh) {
+            setQuestions(fresh);
+            if (activeQuestion) {
+              const updatedActive = fresh.find((q) => q.id === activeQuestion.id);
+              if (updatedActive) setActiveQuestion(updatedActive);
+            }
+          }
+        }
+      };
+    } catch (e) {}
+
+    return () => {
+      if (supabaseSub && supabase) supabase.removeChannel(supabaseSub);
+      if (bc) bc.close();
+    };
+  }, [activeQuestion]);
+
+  const handlePostAnswer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!replyInput.trim() || !activeQuestion) return;
+
+    const answerContent = replyInput.trim();
+    setReplyInput('');
 
     const newAns: QuestionAnswer = {
       id: `ans-${Date.now()}`,
       author: currentUser,
       createdAt: 'Just now',
-      content: replyInput.trim(),
+      content: answerContent,
       upvotes: 1,
     };
 
@@ -110,22 +196,61 @@ export const QuestionsView: React.FC<QuestionsViewProps> = ({
 
     setActiveQuestion(updatedQ);
     setQuestions((prev) => prev.map((q) => (q.id === activeQuestion.id ? updatedQ : q)));
-    setReplyInput('');
+
+    // Persist to Supabase database
+    const dbRes = await createAnswerInDb(activeQuestion.id, newAns, currentUser);
+    if (dbRes.success && dbRes.answer) {
+      const persistedAns = dbRes.answer;
+      setActiveQuestion((prev) =>
+        prev && prev.id === activeQuestion.id
+          ? {
+              ...prev,
+              answers: prev.answers.map((a) => (a.id === newAns.id ? persistedAns : a)),
+            }
+          : prev
+      );
+      setQuestions((prev) =>
+        prev.map((q) =>
+          q.id === activeQuestion.id
+            ? {
+                ...q,
+                answers: q.answers.map((a) => (a.id === newAns.id ? persistedAns : a)),
+              }
+            : q
+        )
+      );
+
+      // Broadcast to other tabs
+      try {
+        const bc = new BroadcastChannel('teamhub_qa_bus');
+        bc.postMessage({ type: 'QA_MUTATED', questionId: activeQuestion.id });
+        bc.close();
+      } catch (e) {}
+    }
   };
 
-  const handleCreateQuestion = (e: React.FormEvent) => {
+  const handleCreateQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
+
+    const title = newTitle.trim();
+    const content = newContext.trim() || 'Shared with Core Engineering Pod.';
+    const tag = newTag;
+
+    setNewTitle('');
+    setNewContext('');
+    setShowAskModal(false);
+    setShowEmptyState(false);
 
     const created: Question = {
       id: `q-${Date.now()}`,
       key: `Q-${Math.floor(1000 + Math.random() * 9000)}`,
-      title: newTitle.trim(),
-      content: newContext.trim() || 'Shared with Core Engineering Pod.',
+      title,
+      content,
       author: currentUser,
       createdAt: 'Just now',
-      tags: [newTag.replace('#', ''), 'engineering'],
-      channel: newTag,
+      tags: [tag.replace('#', ''), 'engineering'],
+      channel: tag,
       status: 'open',
       views: 1,
       upvotes: 1,
@@ -133,10 +258,20 @@ export const QuestionsView: React.FC<QuestionsViewProps> = ({
     };
 
     setQuestions((prev) => [created, ...prev]);
-    setNewTitle('');
-    setNewContext('');
-    setShowAskModal(false);
-    setShowEmptyState(false);
+
+    // Persist to Supabase database
+    const dbRes = await createQuestionInDb(created, currentUser);
+    if (dbRes.success && dbRes.question) {
+      const persistedQ = dbRes.question;
+      setQuestions((prev) => prev.map((q) => (q.id === created.id ? persistedQ : q)));
+
+      // Broadcast to other tabs
+      try {
+        const bc = new BroadcastChannel('teamhub_qa_bus');
+        bc.postMessage({ type: 'QA_MUTATED', questionId: persistedQ.id });
+        bc.close();
+      } catch (e) {}
+    }
   };
 
   // Filter questions
@@ -510,18 +645,16 @@ export const QuestionsView: React.FC<QuestionsViewProps> = ({
                   <h3 className="text-xs font-bold text-[#131b2e]">AI Key Takeaways</h3>
                 </div>
                 <div className="space-y-2 text-xs text-[#3e4a3d]">
-                  <div className="flex items-start gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#006b2c] mt-1.5 shrink-0"></span>
-                    <span>Do not continuously overwrite TTL on every hit; threshold-gate renewals at &lt; 50% lifetime.</span>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#006b2c] mt-1.5 shrink-0"></span>
-                    <span>Bundle renewals in an atomic Lua script to insulate against replication jitter.</span>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#006b2c] mt-1.5 shrink-0"></span>
-                    <span>Pad secondary standby proxy TTL cache with +180s skew buffer during regional failovers.</span>
-                  </div>
+                  {activeQuestion.aiSummary ? (
+                    <p className="leading-relaxed">{activeQuestion.aiSummary}</p>
+                  ) : activeQuestion.answers.length > 0 ? (
+                    <div className="flex items-start gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#006b2c] mt-1.5 shrink-0"></span>
+                      <span>Verified resolution: {activeQuestion.answers[0].content}</span>
+                    </div>
+                  ) : (
+                    <p className="text-[#6e7b6c] italic">No AI takeaways or answers posted yet for this question.</p>
+                  )}
                 </div>
               </div>
 
@@ -677,7 +810,7 @@ export const QuestionsView: React.FC<QuestionsViewProps> = ({
           </div>
 
           {/* EMPTY QUESTIONS STATE (Screen 12) */}
-          {showEmptyState ? (
+          {showEmptyState || filteredQuestions.length === 0 ? (
             <div className="relative rounded-3xl bg-[#ffffff] p-8 sm:p-16 flex flex-col items-center justify-center text-center shadow-xs border border-[#eaedff]">
               <div className="w-32 h-32 rounded-full bg-[#f2f3ff] flex items-center justify-center mb-6 shadow-inner">
                 <span className="material-symbols-outlined text-[48px] text-[#006b2c]">help_outline</span>

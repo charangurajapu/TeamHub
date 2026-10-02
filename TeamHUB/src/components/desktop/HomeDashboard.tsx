@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { User, Task, Question, StandupEntry, ViewMode, Project, Channel } from '../../types';
-import { STANDUP_ENTRIES, INITIAL_TASKS, INITIAL_QUESTIONS, JOIN_REQUESTS, INITIAL_PROJECTS, USERS } from '../../data/mockData';
-import { getActiveWorkspace, fetchProjectsFromDb, createProjectInDb, isSupabaseConfigured, fetchTasksFromDb } from '../../lib/supabase';
+import { User, Task, Question, StandupEntry, ViewMode, Project, Channel, JoinRequest } from '../../types';
+import { STANDUP_ENTRIES, INITIAL_TASKS, JOIN_REQUESTS, INITIAL_PROJECTS, USERS } from '../../data/mockData';
+import { getActiveWorkspace, fetchProjectsFromDb, createProjectInDb, isSupabaseConfigured, fetchTasksFromDb, fetchJoinRequestsFromDb, fetchStandupsFromDb, fetchQuestionsFromDb, fetchProfilesCountFromDb, fetchWorkspaceFilesFromDb, fetchChannelsFromDb } from '../../lib/supabase';
 
 interface HomeDashboardProps {
   currentUser: User;
@@ -23,11 +23,15 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
   onOpenAiDrawer,
   onQuickNewTask,
 }) => {
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS.slice(0, 4));
-  const [allTasks, setAllTasks] = useState<Task[]>(INITIAL_TASKS);
-  const [projects, setProjects] = useState<Project[]>(INITIAL_PROJECTS);
-  const [standups, setStandups] = useState<StandupEntry[]>(STANDUP_ENTRIES);
-  const [joinRequests, setJoinRequests] = useState(JOIN_REQUESTS);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [allTasks, setAllTasks] = useState<Task[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [standups, setStandups] = useState<StandupEntry[]>([]);
+  const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
+  const [activeSeatsCount, setActiveSeatsCount] = useState<number>(0);
+  const [filesCount, setFilesCount] = useState<number>(0);
+  const [channelsCount, setChannelsCount] = useState<number>(0);
   const [unblockedDavid, setUnblockedDavid] = useState(false);
   const [adminPodCode, setAdminPodCode] = useState<string>('TH-4821-ENG');
   const [adminPodCopied, setAdminPodCopied] = useState(false);
@@ -80,16 +84,48 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
       }
 
       const dbProjects = await fetchProjectsFromDb(currentUser);
-      if (isMounted && dbProjects && dbProjects.length > 0) {
+      if (isMounted && dbProjects) {
         setProjects(dbProjects);
       }
 
       if (isSupabaseConfigured) {
         const dbTasks = await fetchTasksFromDb();
-        if (isMounted && dbTasks && dbTasks.length > 0) {
+        if (isMounted && dbTasks) {
           setAllTasks(dbTasks);
           setTasks(dbTasks.slice(0, 4));
         }
+      }
+
+      if (currentUser.role === 'admin') {
+        const joinRes = await fetchJoinRequestsFromDb(currentUser);
+        if (isMounted && joinRes.data) {
+          setJoinRequests(joinRes.data);
+        }
+      }
+
+      const dbStandups = await fetchStandupsFromDb();
+      if (isMounted && dbStandups) {
+        setStandups(dbStandups);
+      }
+
+      const dbQuestions = await fetchQuestionsFromDb();
+      if (isMounted && dbQuestions) {
+        setQuestions(dbQuestions);
+      }
+
+      const profilesCount = await fetchProfilesCountFromDb();
+      if (isMounted) {
+        setActiveSeatsCount(profilesCount);
+      }
+
+      const dbFiles = await fetchWorkspaceFilesFromDb();
+      if (isMounted && dbFiles) {
+        setFilesCount(dbFiles.length);
+      }
+
+      const dbChannels = await fetchChannelsFromDb();
+      if (isMounted && dbChannels) {
+        setChannelsCount(dbChannels.length);
       }
     }
     loadData();
@@ -169,6 +205,28 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
 
   const selectedPodInfo = POD_OPTIONS.find((p) => p.id === newProjectPodId) || POD_OPTIONS[0];
 
+  // Computed dynamic stats for header and overview cards
+  const todayLocaleStr = new Date().toDateString();
+  const tasksDueToday = allTasks.filter((t) => {
+    if (t.status === 'done') return false;
+    if (!t.dueDate) return false;
+    const d = t.dueDate.trim().toLowerCase();
+    if (d === 'today') return true;
+    const taskDate = new Date(t.dueDate);
+    return !isNaN(taskDate.getTime()) && taskDate.toDateString() === todayLocaleStr;
+  });
+  const pendingDueTodayCount = tasksDueToday.length;
+  const highPriorityDueTodayCount = tasksDueToday.filter((t) => t.priority === 'high').length;
+
+  const openQuestionsCount = questions.filter((q) => !q.isAnswered).length;
+  const solvedQuestionsCount = questions.filter((q) => q.isAnswered).length;
+
+  const maxSeats = 30;
+  const seatsPercentage = Math.round((activeSeatsCount / maxSeats) * 100);
+  const completedTasksCount = allTasks.filter((t) => t.status === 'done').length;
+  const totalTasksCount = allTasks.length;
+  const sprintVelocityPct = totalTasksCount > 0 ? Math.round((completedTasksCount / totalTasksCount) * 100) : 0;
+
   return (
     <div className="flex flex-col w-full gap-6">
       {/* ============================================================ */}
@@ -189,9 +247,9 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           </h1>
           <p className="text-sm text-[#3e4a3d]">
             {currentUser.role === 'admin'
-              ? 'Workspace overview: 24 active seats, 3 pending join requests, and system cluster normal.'
+              ? `Workspace overview: ${activeSeatsCount} active seat${activeSeatsCount === 1 ? '' : 's'}, ${joinRequests.length} pending join request${joinRequests.length === 1 ? '' : 's'}, and system cluster normal.`
               : currentUser.role === 'lead'
-              ? 'Welcome back. 4 deliverables await your review and 1 member reported a blocker.'
+              ? 'Welcome back. Team deliverables and standup pulses await your review.'
               : "Here is your team's pulse and your key priorities for today."}
           </p>
         </div>
@@ -261,11 +319,11 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           </div>
           <div className="mt-3 flex items-baseline justify-between">
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold text-[#131b2e]">4</span>
+              <span className="text-3xl font-bold text-[#131b2e]">{pendingDueTodayCount}</span>
               <span className="text-xs text-[#6e7b6c]">pending</span>
             </div>
             <span className="text-[11px] font-semibold text-[#006b2c] bg-[#7ffc97]/30 px-2 py-0.5 rounded-full">
-              2 high priority
+              {highPriorityDueTodayCount} high priority
             </span>
           </div>
         </div>
@@ -286,11 +344,11 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           </div>
           <div className="mt-3 flex items-baseline justify-between">
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold text-[#131b2e]">3</span>
+              <span className="text-3xl font-bold text-[#131b2e]">{openQuestionsCount}</span>
               <span className="text-xs text-[#6e7b6c]">active</span>
             </div>
             <span className="text-[11px] font-semibold text-[#0051d5] bg-[#dbe1ff] px-2 py-0.5 rounded-full">
-              1 solved today
+              {solvedQuestionsCount} solved
             </span>
           </div>
         </div>
@@ -307,15 +365,15 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
             </div>
             <div className="mt-3 flex items-baseline justify-between">
               <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold text-[#131b2e]">24</span>
-                <span className="text-xs text-[#6e7b6c]">/ 30 seats</span>
+                <span className="text-3xl font-bold text-[#131b2e]">{activeSeatsCount}</span>
+                <span className="text-xs text-[#6e7b6c]">/ {maxSeats} seats</span>
               </div>
               <span className="text-[11px] font-semibold text-[#8d4b00] bg-[#ffdcc3] px-2 py-0.5 rounded-full">
-                80% filled
+                {seatsPercentage}% filled
               </span>
             </div>
             <div className="w-full bg-[#eaedff] h-1.5 rounded-full mt-2.5 overflow-hidden">
-              <div className="bg-[#006b2c] h-full rounded-full" style={{ width: '80%' }}></div>
+              <div className="bg-[#006b2c] h-full rounded-full" style={{ width: `${Math.min(100, seatsPercentage)}%` }}></div>
             </div>
           </div>
         ) : (
@@ -329,15 +387,15 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
             </div>
             <div className="mt-3 flex items-baseline justify-between">
               <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold text-[#131b2e]">69%</span>
-                <span className="text-xs text-[#6e7b6c]">18 of 26 tasks</span>
+                <span className="text-3xl font-bold text-[#131b2e]">{sprintVelocityPct}%</span>
+                <span className="text-xs text-[#6e7b6c]">{completedTasksCount} of {totalTasksCount} tasks</span>
               </div>
               <span className="text-[11px] font-semibold text-[#006b2c] bg-[#7ffc97]/30 px-2 py-0.5 rounded-full">
-                +12% pace
+                {completedTasksCount} completed
               </span>
             </div>
             <div className="w-full bg-[#eaedff] h-1.5 rounded-full mt-2.5 overflow-hidden">
-              <div className="bg-[#006b2c] h-full rounded-full" style={{ width: '69%' }}></div>
+              <div className="bg-[#006b2c] h-full rounded-full" style={{ width: `${sprintVelocityPct}%` }}></div>
             </div>
           </div>
         )}
@@ -355,14 +413,14 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           </div>
           <div className="mt-3 flex items-baseline justify-between">
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold text-[#131b2e]">24</span>
-              <span className="text-xs text-[#6e7b6c]">queries</span>
+              <span className="text-3xl font-bold text-[#131b2e]">{filesCount}</span>
+              <span className="text-xs text-[#6e7b6c]">docs indexed</span>
             </div>
             <span className="text-[11px] font-semibold text-[#005320] bg-[#7ffc97] px-2 py-0.5 rounded-full">
               Live Index
             </span>
           </div>
-          <span className="text-[11px] text-[#6e7b6c] mt-2">4 channels & 38 docs indexed</span>
+          <span className="text-[11px] text-[#6e7b6c] mt-2">{channelsCount} channels & {filesCount} files ready</span>
         </div>
       </section>
 
@@ -431,7 +489,14 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
 
         {/* Projects Cards Responsive Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {projects.map((proj) => {
+          {projects.length === 0 ? (
+            <div className="col-span-full p-8 rounded-2xl bg-white border border-[#eaedff] flex flex-col items-center justify-center text-center text-xs text-[#6e7b6c]">
+              <span className="material-symbols-outlined text-[36px] text-[#6e7b6c] mb-2">folder_off</span>
+              <p className="font-semibold text-sm text-[#131b2e]">No active projects</p>
+              <p className="text-[11px] mt-0.5">Projects created for your pod will appear here.</p>
+            </div>
+          ) : (
+            projects.map((proj) => {
             // Live calculation from real tasks!
             const projectTasks = allTasks.filter((t) => t.projectId === proj.id);
             const totalDeliverables = projectTasks.length;
@@ -618,7 +683,8 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                 </div>
               </div>
             );
-          })}
+          })
+        )}
 
           {/* Card 5: + New Project Action Card (Visible to Team Lead and Administrator) */}
           {canCreateProject && (
@@ -659,7 +725,13 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           </div>
 
           <div className="space-y-3">
-            {joinRequests.map((req) => (
+            {joinRequests.length === 0 ? (
+              <div className="p-6 rounded-xl bg-[#f2f3ff] border border-[#eaedff] text-center text-xs text-[#6e7b6c]">
+                <p className="font-semibold text-[#131b2e]">No pending join requests</p>
+                <p className="text-[11px] mt-0.5">All new member registrations have been reviewed.</p>
+              </div>
+            ) : (
+              joinRequests.map((req) => (
               <div
                 key={req.id}
                 className="p-3.5 rounded-xl bg-[#f2f3ff] flex items-center justify-between gap-4 border border-[#eaedff]"
@@ -692,7 +764,8 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                   </button>
                 </div>
               </div>
-            ))}
+            ))
+          )}
           </div>
         </section>
       )}
@@ -766,7 +839,14 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           </div>
 
           <div className="flex flex-col gap-2.5">
-            {tasks.map((task) => (
+            {tasks.length === 0 ? (
+              <div className="p-8 rounded-xl bg-[#faf8ff] border border-[#eaedff]/60 flex flex-col items-center justify-center text-center text-xs text-[#6e7b6c]">
+                <span className="material-symbols-outlined text-[32px] text-[#006b2c] mb-2">task_alt</span>
+                <p className="font-semibold text-[#131b2e]">No priority tasks for today</p>
+                <p className="text-[11px] mt-0.5">You're all caught up on your active deliverables.</p>
+              </div>
+            ) : (
+              tasks.map((task) => (
               <div
                 key={task.id}
                 onClick={() => onNavigate('tasks', task.id)}
@@ -824,7 +904,8 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                   {task.status.replace('_', ' ')}
                 </span>
               </div>
-            ))}
+            ))
+          )}
           </div>
 
           <div className="mt-4 pt-3 flex items-center justify-between text-xs text-[#6e7b6c] border-t border-[#eaedff]">
@@ -847,7 +928,7 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
             <div className="flex items-center gap-2">
               <h2 className="text-base font-semibold text-[#131b2e]">Open Questions</h2>
               <span className="px-2 py-0.5 rounded-full bg-[#eaedff] text-[#3e4a3d] text-xs font-semibold">
-                3 active
+                {questions.length} active
               </span>
             </div>
             <button
@@ -859,33 +940,41 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
           </div>
 
           <div className="flex flex-col gap-3">
-            {INITIAL_QUESTIONS.slice(0, 3).map((q) => (
-              <div
-                key={q.id}
-                onClick={() => onNavigate('questions', q.id)}
-                className="p-3.5 rounded-xl bg-[#faf8ff] hover:bg-[#f2f3ff] transition-all flex flex-col gap-1.5 cursor-pointer border border-[#eaedff]/60"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-full bg-[#eaedff] text-[#006b2c] text-[10px] font-bold flex items-center justify-center">
-                      {q.author.initials}
-                    </div>
-                    <span className="text-xs font-semibold text-[#131b2e]">{q.author.name}</span>
-                  </div>
-                  <span className="text-[10px] text-[#6e7b6c]">in {q.channel}</span>
-                </div>
-                <p className="text-xs text-[#131b2e] font-medium line-clamp-2 leading-relaxed">
-                  {q.title}
-                </p>
-                <div className="flex items-center justify-between pt-1 text-[11px] text-[#6e7b6c]">
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#eaedff] text-[#3e4a3d] font-semibold text-[10px]">
-                    <span className="material-symbols-outlined text-[13px]">chat_bubble_outline</span>
-                    {q.answers.length} replies
-                  </span>
-                  <span className="text-[#006b2c] font-semibold hover:underline">View answers →</span>
-                </div>
+            {questions.length === 0 ? (
+              <div className="p-6 rounded-xl bg-[#faf8ff] text-center border border-[#eaedff]/60 flex flex-col items-center gap-1.5">
+                <span className="material-symbols-outlined text-[24px] text-[#6e7b6c]">help_outline</span>
+                <span className="text-xs font-medium text-[#131b2e]">No open questions</span>
+                <span className="text-[11px] text-[#6e7b6c]">Your team has answered all pending technical questions.</span>
               </div>
-            ))}
+            ) : (
+              questions.slice(0, 3).map((q) => (
+                <div
+                  key={q.id}
+                  onClick={() => onNavigate('questions', q.id)}
+                  className="p-3.5 rounded-xl bg-[#faf8ff] hover:bg-[#f2f3ff] transition-all flex flex-col gap-1.5 cursor-pointer border border-[#eaedff]/60"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-[#eaedff] text-[#006b2c] text-[10px] font-bold flex items-center justify-center">
+                        {q.author.initials}
+                      </div>
+                      <span className="text-xs font-semibold text-[#131b2e]">{q.author.name}</span>
+                    </div>
+                    <span className="text-[10px] text-[#6e7b6c]">in {q.channel}</span>
+                  </div>
+                  <p className="text-xs text-[#131b2e] font-medium line-clamp-2 leading-relaxed">
+                    {q.title}
+                  </p>
+                  <div className="flex items-center justify-between pt-1 text-[11px] text-[#6e7b6c]">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#eaedff] text-[#3e4a3d] font-semibold text-[10px]">
+                      <span className="material-symbols-outlined text-[13px]">chat_bubble_outline</span>
+                      {q.answers.length} replies
+                    </span>
+                    <span className="text-[#006b2c] font-semibold hover:underline">View answers →</span>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </section>
@@ -908,7 +997,14 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-          {standups.map((s) => (
+          {standups.length === 0 ? (
+            <div className="col-span-full p-8 rounded-2xl bg-white border border-[#eaedff] text-center text-xs text-[#6e7b6c] flex flex-col items-center justify-center">
+              <span className="material-symbols-outlined text-[36px] text-[#6e7b6c] mb-2">stream</span>
+              <p className="font-semibold text-sm text-[#131b2e]">No standup updates posted today</p>
+              <p className="text-[11px] mt-0.5">Daily standup check-ins from pod members will appear here.</p>
+            </div>
+          ) : (
+            standups.map((s) => (
             <div
               key={s.id}
               className="bg-[#ffffff] p-4 rounded-2xl shadow-xs border border-[#eaedff] flex flex-col justify-between hover:shadow-md transition-shadow"
@@ -962,7 +1058,8 @@ export const HomeDashboard: React.FC<HomeDashboardProps> = ({
                 <span className="text-[#6e7b6c] hover:text-[#131b2e] cursor-pointer">View notes</span>
               </div>
             </div>
-          ))}
+          ))
+        )}
         </div>
       </section>
 

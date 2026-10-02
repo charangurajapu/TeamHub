@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { WorkspaceFile, User, ViewMode } from '../../types';
-import { WORKSPACE_FILES } from '../../data/mockData';
-import { supabase, getLocalFiles, saveLocalFiles } from '../../lib/supabase';
+import { supabase, getLocalFiles, saveLocalFiles, fetchWorkspaceFilesFromDb } from '../../lib/supabase';
 
 interface FilesViewProps {
   currentUser: User;
@@ -9,14 +8,32 @@ interface FilesViewProps {
 }
 
 export const FilesView: React.FC<FilesViewProps> = ({ currentUser, onNavigate }) => {
-  const [files, setFiles] = useState<WorkspaceFile[]>(() => {
-    const loaded = getLocalFiles();
-    return loaded.length > 0 ? loaded : WORKSPACE_FILES;
-  });
-  const [selectedFile, setSelectedFile] = useState<WorkspaceFile>(() => {
-    const loaded = getLocalFiles();
-    return loaded.length > 0 ? loaded[0] : WORKSPACE_FILES[0];
-  });
+  const [files, setFiles] = useState<WorkspaceFile[]>([]);
+  const [selectedFile, setSelectedFile] = useState<WorkspaceFile | null>(null);
+
+  // Load workspace files from Supabase on mount
+  useEffect(() => {
+    let isMounted = true;
+    async function loadFiles() {
+      try {
+        const data = await fetchWorkspaceFilesFromDb();
+        if (isMounted && data) {
+          setFiles(data);
+          if (data.length > 0) {
+            setSelectedFile(data[0]);
+          } else {
+            setSelectedFile(null);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load workspace files from DB:', err);
+      }
+    }
+    loadFiles();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
   const [selectedFolder, setSelectedFolder] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -46,7 +63,8 @@ export const FilesView: React.FC<FilesViewProps> = ({ currentUser, onNavigate })
     };
   }, []);
 
-  const handleDownloadFile = async (fileToDownload: WorkspaceFile) => {
+  const handleDownloadFile = async (fileToDownload: WorkspaceFile | null) => {
+    if (!fileToDownload) return;
     setUploadToast(`Preparing download for ${fileToDownload.name}...`);
     try {
       let downloadUrl = fileToDownload.url || fileToDownload.previewUrl;
@@ -144,11 +162,18 @@ export const FilesView: React.FC<FilesViewProps> = ({ currentUser, onNavigate })
     }
   };
 
+  const getFolderTime = (folderName: string) => {
+    const folderFiles = files.filter((f) => f.folder === folderName);
+    if (folderFiles.length === 0) return 'Empty';
+    const latest = folderFiles[folderFiles.length - 1];
+    return latest.uploadedAt || 'Active';
+  };
+
   const folders = [
-    { name: 'Engineering Specs', count: files.filter(f => f.folder === 'Engineering Specs').length || 18, time: '2h ago', color: 'bg-[#ffdcc3]/60 text-[#b15f00]' },
-    { name: 'Brand & Design Assets', count: files.filter(f => f.folder === 'Brand & Design Assets').length || 34, time: 'Yesterday', color: 'bg-[#dae2fd] text-[#0051d5]' },
-    { name: 'Architecture RFCs', count: files.filter(f => f.folder === 'Architecture RFCs').length || 12, time: '3d ago', color: 'bg-[#7ffc97]/50 text-[#006b2c]' },
-    { name: 'Sprint Deliverables', count: files.filter(f => f.folder === 'Sprint Deliverables').length || 27, time: 'Oct 24', color: 'bg-[#eaedff] text-[#3e4a3d]' },
+    { name: 'Engineering Specs', count: files.filter((f) => f.folder === 'Engineering Specs').length, time: getFolderTime('Engineering Specs'), color: 'bg-[#ffdcc3]/60 text-[#b15f00]' },
+    { name: 'Brand & Design Assets', count: files.filter((f) => f.folder === 'Brand & Design Assets').length, time: getFolderTime('Brand & Design Assets'), color: 'bg-[#dae2fd] text-[#0051d5]' },
+    { name: 'Architecture RFCs', count: files.filter((f) => f.folder === 'Architecture RFCs').length, time: getFolderTime('Architecture RFCs'), color: 'bg-[#7ffc97]/50 text-[#006b2c]' },
+    { name: 'Sprint Deliverables', count: files.filter((f) => f.folder === 'Sprint Deliverables').length, time: getFolderTime('Sprint Deliverables'), color: 'bg-[#eaedff] text-[#3e4a3d]' },
   ];
 
   const filteredFiles = files.filter((f) => {
@@ -164,6 +189,7 @@ export const FilesView: React.FC<FilesViewProps> = ({ currentUser, onNavigate })
   });
 
   const handleCopyShare = () => {
+    if (!selectedFile) return;
     navigator.clipboard.writeText(`https://teamhub.internal/files/${selectedFile.id}`);
     setCopiedShare(true);
     setTimeout(() => setCopiedShare(false), 1500);
@@ -430,9 +456,28 @@ export const FilesView: React.FC<FilesViewProps> = ({ currentUser, onNavigate })
             <span className="text-xs text-[#6e7b6c]">Sort: Last modified</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredFiles.map((file) => {
-              const isSelected = selectedFile.id === file.id;
+          {filteredFiles.length === 0 ? (
+            <div className="p-12 rounded-2xl bg-white border border-[#eaedff] flex flex-col items-center justify-center text-center">
+              <div className="w-16 h-16 rounded-full bg-[#f2f3ff] flex items-center justify-center mb-4 text-[#6e7b6c]">
+                <span className="material-symbols-outlined text-[32px]">folder_open</span>
+              </div>
+              <p className="font-semibold text-sm text-[#131b2e] mb-1">No files in this workspace</p>
+              <p className="text-xs text-[#6e7b6c] max-w-sm mb-4">
+                Upload your engineering specifications, design assets, or architecture documentation to share with your pod.
+              </p>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="px-4 py-2 rounded-xl bg-[#006b2c] hover:bg-[#00873a] text-white text-xs font-semibold shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <span className="material-symbols-outlined text-[16px]">upload_file</span>
+                <span>Upload First File</span>
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredFiles.map((file) => {
+                const isSelected = selectedFile?.id === file.id;
               return (
                 <div
                   key={file.id}
@@ -508,170 +553,184 @@ export const FilesView: React.FC<FilesViewProps> = ({ currentUser, onNavigate })
               );
             })}
           </div>
+          )}
         </div>
 
         {/* Right: Persistent File Inspector Panel (Screen 5 right panel) */}
         <div className="w-full xl:w-[380px] shrink-0 rounded-2xl bg-[#ffffff] border border-[#eaedff] shadow-sm p-5 flex flex-col gap-4 sticky top-20">
-          <div className="flex items-start justify-between gap-2 pb-3 border-b border-[#eaedff]">
-            <div className="flex flex-col min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="px-2 py-0.5 rounded-full bg-[#7ffc97]/40 text-[#005320] text-[10px] font-bold uppercase">
-                  {selectedFile.type}
-                </span>
-                <span className="text-[11px] text-[#6e7b6c]">{selectedFile.size}</span>
+          {!selectedFile ? (
+            <div className="flex flex-col items-center justify-center text-center py-16 px-4 my-auto">
+              <div className="w-14 h-14 rounded-2xl bg-[#f2f3ff] flex items-center justify-center text-[#6e7b6c] mb-3">
+                <span className="material-symbols-outlined text-[28px]">description</span>
               </div>
-              <h3 className="text-sm font-bold text-[#131b2e] truncate" title={selectedFile.name}>
-                {selectedFile.name}
-              </h3>
+              <h4 className="text-sm font-bold text-[#131b2e] mb-1">No file selected</h4>
+              <p className="text-xs text-[#6e7b6c] max-w-[220px]">
+                Select a file from the workspace to inspect its metadata, preview, and download.
+              </p>
             </div>
+          ) : (
+            <>
+              <div className="flex items-start justify-between gap-2 pb-3 border-b border-[#eaedff]">
+                <div className="flex flex-col min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="px-2 py-0.5 rounded-full bg-[#7ffc97]/40 text-[#005320] text-[10px] font-bold uppercase">
+                      {selectedFile.type}
+                    </span>
+                    <span className="text-[11px] text-[#6e7b6c]">{selectedFile.size}</span>
+                  </div>
+                  <h3 className="text-sm font-bold text-[#131b2e] truncate" title={selectedFile.name}>
+                    {selectedFile.name}
+                  </h3>
+                </div>
 
-            <div className="flex items-center gap-1 shrink-0">
-              <button
-                onClick={handleCopyShare}
-                className="p-1.5 rounded-lg text-[#6e7b6c] hover:bg-[#f2f3ff] transition-colors cursor-pointer"
-                title="Share link"
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  {copiedShare ? 'check' : 'share'}
-                </span>
-              </button>
-            </div>
-          </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={handleCopyShare}
+                    className="p-1.5 rounded-lg text-[#6e7b6c] hover:bg-[#f2f3ff] transition-colors cursor-pointer"
+                    title="Share link"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">
+                      {copiedShare ? 'check' : 'share'}
+                    </span>
+                  </button>
+                </div>
+              </div>
 
-          {/* Visual Preview Stage */}
-          <div className="relative w-full h-44 rounded-xl bg-[#f2f3ff] border border-[#eaedff] overflow-hidden flex flex-col justify-between p-3 group shadow-inner">
-            <div className="flex items-center justify-between text-[11px] z-10">
-              <span className="px-2 py-0.5 rounded bg-white text-[10px] font-mono text-[#6e7b6c]">
-                {selectedFile.type === 'md' ? 'Markdown Document' : (selectedFile.dimensions || '2400 × 1600 px')}
-              </span>
-              <div className="flex items-center gap-1 bg-white/90 backdrop-blur rounded-lg p-0.5">
+              {/* Visual Preview Stage */}
+              <div className="relative w-full h-44 rounded-xl bg-[#f2f3ff] border border-[#eaedff] overflow-hidden flex flex-col justify-between p-3 group shadow-inner">
+                <div className="flex items-center justify-between text-[11px] z-10">
+                  <span className="px-2 py-0.5 rounded bg-white text-[10px] font-mono text-[#6e7b6c]">
+                    {selectedFile.type === 'md' ? 'Markdown Document' : (selectedFile.dimensions || '2400 × 1600 px')}
+                  </span>
+                  <div className="flex items-center gap-1 bg-white/90 backdrop-blur rounded-lg p-0.5">
+                    <button
+                      onClick={() => setZoomLevel(Math.min(150, zoomLevel + 10))}
+                      className="p-1 text-[#6e7b6c] hover:text-[#131b2e] cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[13px]">zoom_in</span>
+                    </button>
+                    <button
+                      onClick={() => setZoomLevel(Math.max(80, zoomLevel - 10))}
+                      className="p-1 text-[#6e7b6c] hover:text-[#131b2e] cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[13px]">zoom_out</span>
+                    </button>
+                  </div>
+                </div>
+
+                {selectedFile.type === 'md' && selectedFile.content ? (
+                  <div className="w-full h-24 overflow-y-auto p-2.5 text-[11px] text-[#131b2e] font-mono leading-relaxed bg-[#ffffff] rounded-lg border border-[#eaedff] shadow-xs my-auto">
+                    <pre className="whitespace-pre-wrap font-sans text-xs text-[#131b2e]">{selectedFile.content.slice(0, 320)}...</pre>
+                  </div>
+                ) : (
+                  /* Simulated diagram preview */
+                  <div
+                    className="flex items-center justify-around my-auto w-full transition-transform duration-100"
+                    style={{ transform: `scale(${zoomLevel / 100})` }}
+                  >
+                    <div className="flex flex-col items-center">
+                      <div className="w-12 h-6 rounded bg-white shadow-xs flex items-center justify-center text-[10px] font-bold text-[#131b2e]">
+                        Client
+                      </div>
+                      <div className="h-6 border-l border-dashed border-[#bdcaba] mt-0.5"></div>
+                    </div>
+                    <span className="material-symbols-outlined text-[#006b2c] text-[16px]">trending_flat</span>
+                    <div className="flex flex-col items-center">
+                      <div className="w-14 h-6 rounded bg-[#7ffc97] text-[#002109] shadow-xs flex items-center justify-center text-[10px] font-bold">
+                        Gateway
+                      </div>
+                      <div className="h-6 border-l border-dashed border-[#006b2c] mt-0.5"></div>
+                    </div>
+                    <span className="material-symbols-outlined text-[#6e7b6c] text-[16px]">trending_flat</span>
+                    <div className="flex flex-col items-center">
+                      <div className="w-12 h-6 rounded bg-white shadow-xs flex items-center justify-center text-[10px] font-bold text-[#131b2e]">
+                        Redis
+                      </div>
+                      <div className="h-6 border-l border-dashed border-[#bdcaba] mt-0.5"></div>
+                    </div>
+                  </div>
+                )}
+
                 <button
-                  onClick={() => setZoomLevel(Math.min(150, zoomLevel + 10))}
-                  className="p-1 text-[#6e7b6c] hover:text-[#131b2e] cursor-pointer"
+                  onClick={() => handleDownloadFile(selectedFile)}
+                  className="self-center flex items-center gap-1 px-3 py-1 rounded-full bg-white/90 text-[#131b2e] text-[10px] font-semibold shadow-xs hover:bg-white transition-all cursor-pointer"
                 >
-                  <span className="material-symbols-outlined text-[13px]">zoom_in</span>
+                  <span className="material-symbols-outlined text-[13px]">visibility</span>
+                  <span>{selectedFile.type === 'md' ? 'Download Markdown' : 'Open full preview'}</span>
+                </button>
+              </div>
+
+              {/* AI File Summary */}
+              <div className="p-3 rounded-xl bg-[#7ffc97]/20 border border-[#7ffc97]/30 flex flex-col gap-1 text-xs">
+                <div className="flex items-center gap-1.5 text-[#006b2c] font-bold text-[11px]">
+                  <span className="material-symbols-outlined text-[15px]">auto_awesome</span>
+                  <span>TeamHub AI File Summary</span>
+                </div>
+                <p className="text-xs text-[#131b2e] leading-relaxed">
+                  {selectedFile.aiSummary || 'Automated AI technical specification and metadata overview.'}
+                </p>
+              </div>
+
+              {/* Properties */}
+              <div className="space-y-2 text-xs">
+                <span className="text-[10px] uppercase font-bold text-[#6e7b6c] tracking-wider block">
+                  Properties
+                </span>
+                <div className="flex items-center justify-between text-[#3e4a3d]">
+                  <span className="text-[#6e7b6c]">File Type</span>
+                  <span className="font-semibold uppercase">{selectedFile.type}</span>
+                </div>
+                <div className="flex items-center justify-between text-[#3e4a3d]">
+                  <span className="text-[#6e7b6c]">Size</span>
+                  <span>{selectedFile.size}</span>
+                </div>
+                <div className="flex items-center justify-between text-[#3e4a3d]">
+                  <span className="text-[#6e7b6c]">Uploaded By</span>
+                  <span className="font-semibold text-[#131b2e]">{selectedFile.uploader.name}</span>
+                </div>
+                <div className="flex items-center justify-between text-[#3e4a3d]">
+                  <span className="text-[#6e7b6c]">Location</span>
+                  <span className="text-[#006b2c] font-semibold truncate max-w-[180px]">
+                    / {selectedFile.folder}
+                  </span>
+                </div>
+              </div>
+
+              {/* Linked References */}
+              {selectedFile.linkedTask && (
+                <div className="space-y-1.5 pt-2 border-t border-[#eaedff]">
+                  <span className="text-[10px] uppercase font-bold text-[#6e7b6c] tracking-wider block">
+                    Linked References
+                  </span>
+                  <button
+                    onClick={() => onNavigate('tasks')}
+                    className="w-full text-left p-2 rounded-xl bg-[#f2f3ff] hover:bg-[#eaedff] flex items-center gap-2 text-xs text-[#131b2e] transition-colors cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[16px] text-[#006b2c]">task_alt</span>
+                    <span className="truncate">{selectedFile.linkedTask}</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Panel Action CTAs */}
+              <div className="flex flex-col gap-2 pt-2 mt-auto">
+                <button
+                  onClick={() => handleDownloadFile(selectedFile)}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#006b2c] hover:bg-[#00873a] text-white text-xs font-semibold transition-colors shadow-xs cursor-pointer active:scale-95"
+                >
+                  <span className="material-symbols-outlined text-[17px]">download</span>
+                  <span>Download ({selectedFile.size})</span>
                 </button>
                 <button
-                  onClick={() => setZoomLevel(Math.max(80, zoomLevel - 10))}
-                  className="p-1 text-[#6e7b6c] hover:text-[#131b2e] cursor-pointer"
+                  onClick={handleCopyShare}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-[#f2f3ff] hover:bg-[#eaedff] text-xs font-semibold text-[#131b2e] transition-colors cursor-pointer"
                 >
-                  <span className="material-symbols-outlined text-[13px]">zoom_out</span>
+                  <span className="material-symbols-outlined text-[17px] text-[#6e7b6c]">link</span>
+                  <span>{copiedShare ? 'Link Copied!' : 'Copy Share Link'}</span>
                 </button>
               </div>
-            </div>
-
-            {selectedFile.type === 'md' && selectedFile.content ? (
-              <div className="w-full h-24 overflow-y-auto p-2.5 text-[11px] text-[#131b2e] font-mono leading-relaxed bg-[#ffffff] rounded-lg border border-[#eaedff] shadow-xs my-auto">
-                <pre className="whitespace-pre-wrap font-sans text-xs text-[#131b2e]">{selectedFile.content.slice(0, 320)}...</pre>
-              </div>
-            ) : (
-              /* Simulated diagram preview */
-              <div
-                className="flex items-center justify-around my-auto w-full transition-transform duration-100"
-                style={{ transform: `scale(${zoomLevel / 100})` }}
-              >
-                <div className="flex flex-col items-center">
-                  <div className="w-12 h-6 rounded bg-white shadow-xs flex items-center justify-center text-[10px] font-bold text-[#131b2e]">
-                    Client
-                  </div>
-                  <div className="h-6 border-l border-dashed border-[#bdcaba] mt-0.5"></div>
-                </div>
-                <span className="material-symbols-outlined text-[#006b2c] text-[16px]">trending_flat</span>
-                <div className="flex flex-col items-center">
-                  <div className="w-14 h-6 rounded bg-[#7ffc97] text-[#002109] shadow-xs flex items-center justify-center text-[10px] font-bold">
-                    Gateway
-                  </div>
-                  <div className="h-6 border-l border-dashed border-[#006b2c] mt-0.5"></div>
-                </div>
-                <span className="material-symbols-outlined text-[#6e7b6c] text-[16px]">trending_flat</span>
-                <div className="flex flex-col items-center">
-                  <div className="w-12 h-6 rounded bg-white shadow-xs flex items-center justify-center text-[10px] font-bold text-[#131b2e]">
-                    Redis
-                  </div>
-                  <div className="h-6 border-l border-dashed border-[#bdcaba] mt-0.5"></div>
-                </div>
-              </div>
-            )}
-
-            <button
-              onClick={() => handleDownloadFile(selectedFile)}
-              className="self-center flex items-center gap-1 px-3 py-1 rounded-full bg-white/90 text-[#131b2e] text-[10px] font-semibold shadow-xs hover:bg-white transition-all cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[13px]">visibility</span>
-              <span>{selectedFile.type === 'md' ? 'Download Markdown' : 'Open full preview'}</span>
-            </button>
-          </div>
-
-          {/* AI File Summary */}
-          <div className="p-3 rounded-xl bg-[#7ffc97]/20 border border-[#7ffc97]/30 flex flex-col gap-1 text-xs">
-            <div className="flex items-center gap-1.5 text-[#006b2c] font-bold text-[11px]">
-              <span className="material-symbols-outlined text-[15px]">auto_awesome</span>
-              <span>TeamHub AI File Summary</span>
-            </div>
-            <p className="text-xs text-[#131b2e] leading-relaxed">
-              {selectedFile.aiSummary ||
-                'Contains sequence flow of OAuth2 token exchange with sliding-window Redis cache fallback and TTL renewal steps.'}
-            </p>
-          </div>
-
-          {/* Properties */}
-          <div className="space-y-2 text-xs">
-            <span className="text-[10px] uppercase font-bold text-[#6e7b6c] tracking-wider block">
-              Properties
-            </span>
-            <div className="flex items-center justify-between text-[#3e4a3d]">
-              <span className="text-[#6e7b6c]">File Type</span>
-              <span className="font-semibold uppercase">{selectedFile.type}</span>
-            </div>
-            <div className="flex items-center justify-between text-[#3e4a3d]">
-              <span className="text-[#6e7b6c]">Size</span>
-              <span>{selectedFile.size}</span>
-            </div>
-            <div className="flex items-center justify-between text-[#3e4a3d]">
-              <span className="text-[#6e7b6c]">Uploaded By</span>
-              <span className="font-semibold text-[#131b2e]">{selectedFile.uploader.name}</span>
-            </div>
-            <div className="flex items-center justify-between text-[#3e4a3d]">
-              <span className="text-[#6e7b6c]">Location</span>
-              <span className="text-[#006b2c] font-semibold truncate max-w-[180px]">
-                / {selectedFile.folder}
-              </span>
-            </div>
-          </div>
-
-          {/* Linked References */}
-          {selectedFile.linkedTask && (
-            <div className="space-y-1.5 pt-2 border-t border-[#eaedff]">
-              <span className="text-[10px] uppercase font-bold text-[#6e7b6c] tracking-wider block">
-                Linked References
-              </span>
-              <button
-                onClick={() => onNavigate('tasks')}
-                className="w-full text-left p-2 rounded-xl bg-[#f2f3ff] hover:bg-[#eaedff] flex items-center gap-2 text-xs text-[#131b2e] transition-colors cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[16px] text-[#006b2c]">task_alt</span>
-                <span className="truncate">{selectedFile.linkedTask}</span>
-              </button>
-            </div>
+            </>
           )}
-
-          {/* Panel Action CTAs */}
-          <div className="flex flex-col gap-2 pt-2 mt-auto">
-            <button
-              onClick={() => handleDownloadFile(selectedFile)}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#006b2c] hover:bg-[#00873a] text-white text-xs font-semibold transition-colors shadow-xs cursor-pointer active:scale-95"
-            >
-              <span className="material-symbols-outlined text-[17px]">download</span>
-              <span>Download ({selectedFile.size})</span>
-            </button>
-            <button
-              onClick={handleCopyShare}
-              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-[#f2f3ff] hover:bg-[#eaedff] text-xs font-semibold text-[#131b2e] transition-colors cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[17px] text-[#6e7b6c]">link</span>
-              <span>{copiedShare ? 'Link Copied!' : 'Copy Share Link'}</span>
-            </button>
-          </div>
         </div>
       </div>
     </div>

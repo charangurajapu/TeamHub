@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Task, TaskStatus, User } from '../../types';
 import { INITIAL_TASKS, USERS } from '../../data/mockData';
-import { fetchTasksFromDb, createTaskInDb, updateTaskInDb, isSupabaseConfigured, getLocalProjects, getEligibleTaskAssignees } from '../../lib/supabase';
+import { fetchTasksFromDb, createTaskInDb, updateTaskInDb, isSupabaseConfigured, getLocalProjects, getEligibleTaskAssignees, supabase } from '../../lib/supabase';
 import { TaskDetailDrawer } from './TaskDetailDrawer';
 
 interface TasksKanbanViewProps {
@@ -15,13 +15,78 @@ export const TasksKanbanView: React.FC<TasksKanbanViewProps> = ({
   onOpenAiDrawer,
   selectedTaskId,
 }) => {
-  const [tasks, setTasks] = useState<Task[]>(INITIAL_TASKS);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     selectedTaskId?.startsWith('proj-') ? selectedTaskId : null
   );
-  const [activeTask, setActiveTask] = useState<Task | null>(
-    INITIAL_TASKS.find((t) => t.id === selectedTaskId && !t.id.startsWith('proj-')) || null
-  );
+  const [activeTask, setActiveTask] = useState<Task | null>(null);
+
+  // Load tasks from Supabase on mount
+  useEffect(() => {
+    let isMounted = true;
+    async function loadTasks() {
+      try {
+        const data = await fetchTasksFromDb();
+        if (isMounted && data !== null) {
+          setTasks(data);
+          if (data.length > 0 && selectedTaskId) {
+            const found = data.find(
+              (t) => t.id === selectedTaskId || t.key.toLowerCase() === selectedTaskId.toLowerCase()
+            );
+            if (found) setActiveTask(found);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load tasks from DB:', err);
+      }
+    }
+    loadTasks();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Supabase Realtime & Cross-tab Tasks Bus
+  useEffect(() => {
+    let supabaseSub: any = null;
+    if (supabase) {
+      try {
+        supabaseSub = supabase
+          .channel('realtime_tasks_feed')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'tasks' },
+            async (payload: any) => {
+              console.log('[Realtime Tasks] change received from Supabase:', payload);
+              const fresh = await fetchTasksFromDb();
+              if (fresh) setTasks(fresh);
+            }
+          )
+          .subscribe((status, err) => {
+            console.log('[Realtime Tasks] Subscription status:', status, err || '');
+          });
+      } catch (e) {
+        console.warn('Realtime Tasks subscription error:', e);
+      }
+    }
+
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel('teamhub_tasks_bus');
+      bc.onmessage = async (evt) => {
+        if (evt.data?.type === 'TASK_MUTATED') {
+          console.log('[Cross-Tab Tasks Bus] message:', evt.data);
+          const fresh = await fetchTasksFromDb();
+          if (fresh) setTasks(fresh);
+        }
+      };
+    } catch (e) {}
+
+    return () => {
+      if (supabaseSub && supabase) supabase.removeChannel(supabaseSub);
+      if (bc) bc.close();
+    };
+  }, []);
   const [viewType, setViewType] = useState<'board' | 'list'>('board');
   const [scope, setScope] = useState<'all' | 'my'>('all');
   const [memberFilter, setMemberFilter] = useState<string>('everyone');
@@ -89,6 +154,12 @@ export const TasksKanbanView: React.FC<TasksKanbanViewProps> = ({
     setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
     setActiveTask(updated);
 
+    try {
+      const bc = new BroadcastChannel('teamhub_tasks_bus');
+      bc.postMessage({ type: 'TASK_MUTATED', taskId: updated.id, action: 'UPDATE' });
+      bc.close();
+    } catch (e) {}
+
     if (isSupabaseConfigured) {
       const res = await updateTaskInDb(updated, currentUser);
       if (res.error) {
@@ -102,6 +173,12 @@ export const TasksKanbanView: React.FC<TasksKanbanViewProps> = ({
     const updatedTasks = tasks.map((t) => (t.id === taskId ? { ...t, status: newStatus } : t));
     setTasks(updatedTasks);
     const target = updatedTasks.find((t) => t.id === taskId);
+
+    try {
+      const bc = new BroadcastChannel('teamhub_tasks_bus');
+      bc.postMessage({ type: 'TASK_MUTATED', taskId, status: newStatus, action: 'MOVE' });
+      bc.close();
+    } catch (e) {}
 
     if (target && isSupabaseConfigured) {
       const res = await updateTaskInDb(target, currentUser);
@@ -158,6 +235,12 @@ export const TasksKanbanView: React.FC<TasksKanbanViewProps> = ({
     setNewTaskDesc('');
     setShowNewTaskModal(false);
     setShowEmptyState(false);
+
+    try {
+      const bc = new BroadcastChannel('teamhub_tasks_bus');
+      bc.postMessage({ type: 'TASK_MUTATED', taskId: finalTask.id, action: 'CREATE' });
+      bc.close();
+    } catch (e) {}
   };
 
   // Filter tasks
@@ -434,7 +517,7 @@ export const TasksKanbanView: React.FC<TasksKanbanViewProps> = ({
       {/* ============================================================ */}
       {/* EMPTY TASKS STATE DEMO (Screen 13)                           */}
       {/* ============================================================ */}
-      {showEmptyState ? (
+      {showEmptyState || filteredTasks.length === 0 ? (
         <div className="relative w-full rounded-3xl bg-[#ffffff] p-8 sm:p-16 shadow-xs border border-[#eaedff] flex flex-col items-center justify-center text-center overflow-hidden">
           <div className="relative z-10 flex flex-col items-center max-w-md mx-auto">
             <div className="w-32 h-32 rounded-full bg-[#f2f3ff] flex items-center justify-center mb-6 shadow-inner">
